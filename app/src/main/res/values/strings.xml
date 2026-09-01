@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Car Launcher</string>
+    <string name="settings_label">Car Launcher Settings</string>
+    <string name="media_label">Car Launcher Media</string>
+    <string name="notification_access_label">Car Launcher notification access</string>
+</resources>

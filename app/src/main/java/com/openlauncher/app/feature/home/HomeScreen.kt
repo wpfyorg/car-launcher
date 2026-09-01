@@ -1,0 +1,796 @@
+package com.openlauncher.app.feature.home
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AltRoute
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.LocationOff
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.MyLocation
+import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Place
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import com.openlauncher.app.design.theme.CarColors
+import com.openlauncher.app.design.theme.CarShapes
+import com.openlauncher.app.design.theme.CarSpacing
+import com.openlauncher.app.feature.media.MediaSourceDots
+import com.openlauncher.app.feature.media.MediaSourceSession
+import com.openlauncher.app.feature.media.MediaState
+import com.openlauncher.app.feature.media.WavyProgressBar
+import com.openlauncher.app.feature.navigation.Maneuver
+import com.openlauncher.app.feature.navigation.NavigationError
+import com.openlauncher.app.feature.navigation.NavigationProgress
+import com.openlauncher.app.feature.navigation.NavigationState
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.flow.collect
+
+@Composable
+fun HomeRoute(
+    mediaState: MediaState,
+    onMediaClick: () -> Unit,
+    onMediaSessionSelect: (String) -> Unit,
+    onMediaPlayPause: () -> Unit,
+    onMediaPrevious: () -> Unit,
+    onMediaNext: () -> Unit,
+) {
+    HomeScreen(
+        state = HomeUiState(media = mediaState),
+        onMediaClick = onMediaClick,
+        onMediaSessionSelect = onMediaSessionSelect,
+        onMediaPlayPause = onMediaPlayPause,
+        onMediaPrevious = onMediaPrevious,
+        onMediaNext = onMediaNext,
+    )
+}
+
+@Composable
+fun HomeScreen(
+    state: HomeUiState,
+    onSearchClick: () -> Unit = {},
+    onStopNavigation: () -> Unit = {},
+    onMediaClick: () -> Unit = {},
+    onMediaSessionSelect: (String) -> Unit = {},
+    onMediaPlayPause: () -> Unit = {},
+    onMediaPrevious: () -> Unit = {},
+    onMediaNext: () -> Unit = {},
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val isPortraitFamily = maxWidth < 880.dp && maxHeight >= 560.dp
+        val contextWidth = when {
+            maxWidth >= 1700.dp -> 600.dp
+            maxWidth >= 1150.dp -> 420.dp
+            else -> 304.dp
+        }
+
+        if (isPortraitFamily) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = CarSpacing.Md, end = CarSpacing.Md, bottom = CarSpacing.Md),
+                verticalArrangement = Arrangement.spacedBy(CarSpacing.Md),
+            ) {
+                NavigationSurface(
+                    state = state.navigation,
+                    onSearchClick = onSearchClick,
+                    onStopNavigation = onStopNavigation,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                )
+
+                MediaCard(
+                    state = state.media,
+                    onClick = onMediaClick,
+                    onSessionSelect = onMediaSessionSelect,
+                    onPlayPause = onMediaPlayPause,
+                    onPrevious = onMediaPrevious,
+                    onNext = onMediaNext,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(196.dp),
+                )
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(CarSpacing.Md),
+            ) {
+                NavigationSurface(
+                    state = state.navigation,
+                    onSearchClick = onSearchClick,
+                    onStopNavigation = onStopNavigation,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                )
+
+                ContextColumn(
+                    media = state.media,
+                    onMediaClick = onMediaClick,
+                    onMediaSessionSelect = onMediaSessionSelect,
+                    onMediaPlayPause = onMediaPlayPause,
+                    onMediaPrevious = onMediaPrevious,
+                    onMediaNext = onMediaNext,
+                    width = contextWidth,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NavigationSurface(
+    state: NavigationState,
+    onSearchClick: () -> Unit,
+    onStopNavigation: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(CarShapes.medium)
+            .background(CarColors.Surface),
+    ) {
+        Surface(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .size(56.dp),
+            shape = CircleShape,
+            color = CarColors.AccentStrong,
+            shadowElevation = 8.dp,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Rounded.Navigation,
+                    contentDescription = null,
+                    modifier = Modifier.size(30.dp),
+                    tint = Color.White,
+                )
+            }
+        }
+
+        when {
+            state.progress.arrived -> NavigationStatusCard(
+                icon = Icons.Rounded.CheckCircle,
+                title = "You’ve arrived",
+                body = "Route guidance has ended",
+                actionLabel = "Search destination",
+                onAction = onSearchClick,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+            )
+
+            !state.gpsAvailable -> NavigationStatusCard(
+                icon = Icons.Rounded.LocationOff,
+                title = "GPS unavailable",
+                body = "Waiting for a location fix",
+                actionLabel = "Try again",
+                onAction = onSearchClick,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+            )
+
+            state.error == NavigationError.ProviderUnavailable -> NavigationStatusCard(
+                icon = Icons.Rounded.AltRoute,
+                title = "Navigation app unavailable",
+                body = "Choose or install a compatible navigation app",
+                actionLabel = "Navigation settings",
+                onAction = onSearchClick,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+            )
+
+            state.error != null -> NavigationStatusCard(
+                icon = Icons.Rounded.AltRoute,
+                title = when (state.error) {
+                    NavigationError.RouteUnavailable -> "Route unavailable"
+                    NavigationError.PermissionDenied -> "Location permission required"
+                    else -> "Navigation unavailable"
+                },
+                body = when (state.error) {
+                    NavigationError.RouteUnavailable -> "Choose another destination or route"
+                    NavigationError.PermissionDenied -> "Allow location access to use navigation"
+                    else -> "Navigation could not start"
+                },
+                actionLabel = "Try again",
+                onAction = onSearchClick,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+            )
+
+            state.active && state.progress.nextManeuver != null -> {
+                TurnCard(
+                    progress = state.progress,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp),
+                )
+                EtaCard(
+                    progress = state.progress,
+                    onStopNavigation = onStopNavigation,
+                    onSearchClick = onSearchClick,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp),
+                )
+            }
+
+            else -> NavigationStatusCard(
+                icon = Icons.Rounded.Navigation,
+                title = "Ready to drive",
+                body = "Choose a destination to start navigation",
+                actionLabel = "Search destination",
+                onAction = onSearchClick,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TurnCard(
+    progress: NavigationProgress,
+    modifier: Modifier = Modifier,
+) {
+    val maneuver = progress.nextManeuver ?: return
+    val secondary = progress.secondaryManeuver
+    Column(
+        modifier = modifier.width(386.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    color = Color(0xFF006A54),
+                    shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp),
+                )
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Navigation,
+                contentDescription = null,
+                modifier = Modifier.size(46.dp),
+                tint = Color.White,
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = formatDistance(maneuver.distanceMeters),
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = maneuver.roadName ?: maneuver.instruction,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    color = Color(0xFF015141),
+                    shape = RoundedCornerShape(bottomStart = 18.dp, bottomEnd = 18.dp),
+                )
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Then",
+                color = CarColors.TextPrimary,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Icon(
+                imageVector = Icons.Rounded.Navigation,
+                contentDescription = null,
+                modifier = Modifier.size(30.dp),
+                tint = CarColors.TextPrimary,
+            )
+            Text(
+                text = secondary?.instruction ?: "Continue",
+                color = CarColors.TextSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EtaCard(
+    progress: NavigationProgress,
+    onStopNavigation: () -> Unit,
+    onSearchClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.width(377.dp),
+        color = CarColors.Surface,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CarColors.Outline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                text = formatDuration(progress.remainingDurationSeconds),
+                color = Color(0xFF5BBF6B),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                text = listOfNotNull(
+                    formatDistance(progress.remainingDistanceMeters).takeIf(String::isNotBlank),
+                    formatEta(progress.etaEpochMillis),
+                ).joinToString(" · "),
+                color = CarColors.TextSecondary,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(CarColors.Outline),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TonalActionButton(Icons.Rounded.Close, "Stop navigation", onStopNavigation, wide = true)
+                TonalActionButton(Icons.Rounded.AltRoute, "Routes", {})
+                TonalActionButton(Icons.Rounded.Search, "Search", onSearchClick)
+                TonalActionButton(Icons.Rounded.Place, "Places", {})
+            }
+        }
+    }
+}
+
+private fun formatDistance(meters: Double?): String {
+    if (meters == null || meters < 0.0) return ""
+    val feet = meters * 3.28084
+    return if (feet < 1_000.0) {
+        "${feet.toInt()} ft"
+    } else {
+        String.format(Locale.US, "%.1f mi", meters / 1_609.344)
+    }
+}
+
+private fun formatDuration(seconds: Long?): String {
+    if (seconds == null || seconds < 0L) return ""
+    val minutes = (seconds + 30L) / 60L
+    return if (minutes < 60L) {
+        "$minutes min"
+    } else {
+        val hours = minutes / 60L
+        val remainder = minutes % 60L
+        if (remainder == 0L) "$hours hr" else "$hours hr $remainder min"
+    }
+}
+
+private val EtaFormatter = DateTimeFormatter.ofPattern("h:mm a")
+
+private fun formatEta(epochMillis: Long?): String? {
+    if (epochMillis == null || epochMillis <= 0L) return null
+    return Instant.ofEpochMilli(epochMillis)
+        .atZone(ZoneId.systemDefault())
+        .format(EtaFormatter)
+        .lowercase(Locale.getDefault())
+}
+
+@Composable
+private fun NavigationStatusCard(
+    icon: ImageVector,
+    title: String,
+    body: String,
+    actionLabel: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.width(377.dp),
+        color = CarColors.Surface,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, CarColors.Outline),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(34.dp),
+                    tint = CarColors.AccentMuted,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        color = CarColors.TextPrimary,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = body,
+                        color = CarColors.TextSecondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+            Surface(
+                onClick = onAction,
+                modifier = Modifier.fillMaxWidth(),
+                color = CarColors.SurfaceElevated,
+                shape = RoundedCornerShape(36.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint = CarColors.TextPrimary,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = actionLabel,
+                        color = CarColors.TextPrimary,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContextColumn(
+    media: MediaState,
+    onMediaClick: () -> Unit,
+    onMediaSessionSelect: (String) -> Unit,
+    onMediaPlayPause: () -> Unit,
+    onMediaPrevious: () -> Unit,
+    onMediaNext: () -> Unit,
+    width: Dp,
+) {
+    Column(
+        modifier = Modifier
+            .width(width)
+            .fillMaxHeight(),
+        verticalArrangement = Arrangement.Top,
+    ) {
+        MediaCard(
+            state = media,
+            onClick = onMediaClick,
+            onSessionSelect = onMediaSessionSelect,
+            onPlayPause = onMediaPlayPause,
+            onPrevious = onMediaPrevious,
+            onNext = onMediaNext,
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(),
+        )
+    }
+}
+
+@Composable
+private fun MediaCard(
+    state: MediaState,
+    onClick: () -> Unit,
+    onSessionSelect: (String) -> Unit,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sessions = state.availableSessions.ifEmpty {
+        listOfNotNull(state.selectedSession)
+    }
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        color = CarColors.SurfaceContainer,
+        shape = CarShapes.medium,
+    ) {
+        if (state.hasSession && sessions.isNotEmpty()) {
+            val initialPage = sessions.indexOfFirst { it.id == state.selectedSessionId }
+                .coerceAtLeast(0)
+            val pagerState = rememberPagerState(initialPage = initialPage) { sessions.size }
+            val sessionIds = sessions.map(MediaSourceSession::id)
+            val currentSelectedSessionId = rememberUpdatedState(state.selectedSessionId)
+
+            LaunchedEffect(state.selectedSessionId, sessionIds) {
+                val selectedIndex = sessionIds.indexOf(state.selectedSessionId)
+                if (selectedIndex >= 0 && pagerState.currentPage != selectedIndex) {
+                    pagerState.scrollToPage(selectedIndex)
+                }
+            }
+
+            LaunchedEffect(pagerState, sessionIds) {
+                androidx.compose.runtime.snapshotFlow { pagerState.settledPage }
+                    .collect { page ->
+                        val id = sessionIds.getOrNull(page) ?: return@collect
+                        if (id != currentSelectedSessionId.value) {
+                            onSessionSelect(id)
+                        }
+                    }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    beyondViewportPageCount = 1,
+                ) { page ->
+                    PlayingMediaContent(
+                        session = sessions[page],
+                        onPlayPause = onPlayPause,
+                        onPrevious = onPrevious,
+                        onNext = onNext,
+                    )
+                }
+
+                MediaSourceDots(
+                    count = sessions.size,
+                    selectedIndex = pagerState.currentPage,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp),
+                )
+            }
+        } else {
+            IdleMediaContent()
+        }
+    }
+}
+
+@Composable
+private fun IdleMediaContent() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Surface(
+            modifier = Modifier.size(88.dp),
+            shape = CircleShape,
+            color = Color.White.copy(alpha = 0.12f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Rounded.MusicNote,
+                    contentDescription = null,
+                    modifier = Modifier.size(44.dp),
+                    tint = Color.White,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Nothing playing",
+            color = Color.White,
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(
+            text = "Open Media to choose something to play",
+            color = Color.White.copy(alpha = 0.76f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun PlayingMediaContent(
+    session: MediaSourceSession,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        session.artwork?.let { artwork ->
+            Image(
+                bitmap = artwork.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.10f),
+                        0.46f to Color.Black.copy(alpha = 0.32f),
+                        1f to Color.Black.copy(alpha = 0.92f),
+                    ),
+                ),
+        )
+
+        session.source?.icon?.let { icon ->
+            Image(
+                bitmap = icon.asImageBitmap(),
+                contentDescription = session.source.label,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+                    .size(34.dp),
+                contentScale = ContentScale.Fit,
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Bottom,
+        ) {
+            Text(
+                text = session.title.ifBlank { "Unknown track" },
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = session.artist.ifBlank { session.source?.label.orEmpty() },
+                color = Color.White.copy(alpha = 0.80f),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            WavyProgressBar(
+                progress = session.progress,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MediaControl(
+                    icon = Icons.Rounded.SkipPrevious,
+                    contentDescription = "Previous",
+                    onClick = onPrevious,
+                    enabled = session.controls.canSkipPrevious,
+                )
+                Surface(
+                    onClick = onPlayPause,
+                    enabled = session.controls.canPlayPause,
+                    modifier = Modifier.size(58.dp),
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.92f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (session.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (session.isPlaying) "Pause" else "Play",
+                            modifier = Modifier.size(32.dp),
+                            tint = Color(0xFF171717),
+                        )
+                    }
+                }
+                MediaControl(
+                    icon = Icons.Rounded.SkipNext,
+                    contentDescription = "Next",
+                    onClick = onNext,
+                    enabled = session.controls.canSkipNext,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaControl(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    IconButton(onClick = onClick, enabled = enabled) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            modifier = Modifier.size(40.dp),
+            tint = Color.White.copy(alpha = if (enabled) 1f else 0.35f),
+        )
+    }
+}
+
+@Composable
+private fun TonalActionButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    wide: Boolean = false,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .width(if (wide) 88.dp else 56.dp)
+            .height(56.dp),
+        color = if (wide) CarColors.SurfaceElevated else Color.Transparent,
+        shape = RoundedCornerShape(56.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                modifier = Modifier.size(32.dp),
+                tint = CarColors.TextPrimary,
+            )
+        }
+    }
+}
