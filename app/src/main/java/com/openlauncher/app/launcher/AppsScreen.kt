@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items as lazyListItems
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -36,7 +37,10 @@ import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Settings
 import com.openlauncher.app.design.component.CarGridItem
 import com.openlauncher.app.design.component.CarHeader
+import com.openlauncher.app.design.component.CarListRow
+import com.openlauncher.app.design.component.CarSearchEmptyState
 import com.openlauncher.app.design.component.CarSearchField
+import com.openlauncher.app.design.component.CarSearchResultsList
 import com.openlauncher.app.design.theme.CarColors
 
 @Composable
@@ -85,15 +89,81 @@ fun AppsScreen(
             }
 
             state.visibleApps.isEmpty() && !showsSettings -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (state.query.isBlank()) "No launchable apps" else "No matching apps",
-                        color = CarColors.TextSecondary,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
+                CarSearchEmptyState(
+                    title = if (state.query.isBlank()) "No launchable apps" else "No matching apps",
+                    message = if (state.query.isBlank()) {
+                        "Installed launchable apps will appear here."
+                    } else {
+                        "Try a different app name or package."
+                    },
+                )
+            }
+
+            state.query.isNotBlank() -> {
+                CarSearchResultsList {
+                    if (showsSettings) {
+                        item(key = "openlauncher-settings-search") {
+                            CarListRow(
+                                title = "Settings",
+                                subtitle = "Car Launcher settings",
+                                onClick = onOpenSettings,
+                                leading = {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Settings,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = CarColors.TextPrimary,
+                                    )
+                                },
+                            )
+                        }
+                    }
+                    lazyListItems(
+                        items = state.visibleApps,
+                        key = LauncherApp::stableKey,
+                    ) { app ->
+                        Box {
+                            CarListRow(
+                                title = app.label,
+                                subtitle = app.packageName,
+                                onClick = { onAppClick(app) },
+                                onLongClick = { contextMenuAppKey = app.stableKey },
+                                leading = {
+                                    LauncherAppIcon(
+                                        app = app,
+                                        iconLoader = iconLoader,
+                                        size = 48.dp,
+                                    )
+                                },
+                                trailing = if (state.isPinned(app)) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PushPin,
+                                            contentDescription = "Pinned",
+                                            modifier = Modifier.size(24.dp),
+                                            tint = CarColors.AccentMuted,
+                                        )
+                                    }
+                                } else {
+                                    null
+                                },
+                            )
+
+                            AppContextMenu(
+                                expanded = contextMenuAppKey == app.stableKey,
+                                isPinned = state.isPinned(app),
+                                onDismiss = { contextMenuAppKey = null },
+                                onTogglePinned = {
+                                    contextMenuAppKey = null
+                                    onTogglePinned(app)
+                                },
+                                onOpenAppInfo = {
+                                    contextMenuAppKey = null
+                                    onOpenAppInfo(app)
+                                },
+                            )
+                        }
+                    }
                 }
             }
 
@@ -149,39 +219,19 @@ fun AppsScreen(
                                 }
                             }
 
-                            DropdownMenu(
+                            AppContextMenu(
                                 expanded = contextMenuAppKey == app.stableKey,
-                                onDismissRequest = { contextMenuAppKey = null },
-                            ) {
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(if (state.isPinned(app)) "Unpin" else "Pin")
-                                    },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.PushPin,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        contextMenuAppKey = null
-                                        onTogglePinned(app)
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("App info") },
-                                    leadingIcon = {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Info,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    onClick = {
-                                        contextMenuAppKey = null
-                                        onOpenAppInfo(app)
-                                    },
-                                )
-                            }
+                                isPinned = state.isPinned(app),
+                                onDismiss = { contextMenuAppKey = null },
+                                onTogglePinned = {
+                                    contextMenuAppKey = null
+                                    onTogglePinned(app)
+                                },
+                                onOpenAppInfo = {
+                                    contextMenuAppKey = null
+                                    onOpenAppInfo(app)
+                                },
+                            )
                         }
                     }
                 }
@@ -194,6 +244,7 @@ fun AppsScreen(
 private fun LauncherAppIcon(
     app: LauncherApp,
     iconLoader: suspend (LauncherApp) -> ImageBitmap?,
+    size: androidx.compose.ui.unit.Dp = 80.dp,
 ) {
     val image by produceState<ImageBitmap?>(initialValue = null, app.stableKey) {
         value = iconLoader(app)
@@ -203,13 +254,13 @@ private fun LauncherAppIcon(
         Image(
             bitmap = image!!,
             contentDescription = null,
-            modifier = Modifier.size(80.dp),
+            modifier = Modifier.size(size),
             contentScale = ContentScale.Fit,
         )
     } else {
         Box(
             modifier = Modifier
-                .size(80.dp)
+                .size(size)
                 .background(FallbackIconColor, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
@@ -219,6 +270,41 @@ private fun LauncherAppIcon(
                 style = MaterialTheme.typography.headlineMedium,
             )
         }
+    }
+}
+
+@Composable
+private fun AppContextMenu(
+    expanded: Boolean,
+    isPinned: Boolean,
+    onDismiss: () -> Unit,
+    onTogglePinned: () -> Unit,
+    onOpenAppInfo: () -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+    ) {
+        DropdownMenuItem(
+            text = { Text(if (isPinned) "Unpin" else "Pin") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.PushPin,
+                    contentDescription = null,
+                )
+            },
+            onClick = onTogglePinned,
+        )
+        DropdownMenuItem(
+            text = { Text("App info") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.Info,
+                    contentDescription = null,
+                )
+            },
+            onClick = onOpenAppInfo,
+        )
     }
 }
 

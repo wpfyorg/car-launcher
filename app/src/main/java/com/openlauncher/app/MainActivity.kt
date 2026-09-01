@@ -15,7 +15,7 @@ class MainActivity : ComponentActivity() {
         hideSystemBars()
 
         setContent {
-            OpenLauncherApp()
+            CarLauncherApp()
         }
     }
 

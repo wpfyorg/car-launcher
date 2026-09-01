@@ -18,13 +18,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
-import androidx.compose.material.icons.rounded.Launch
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -39,9 +40,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -58,11 +62,13 @@ import com.openlauncher.app.design.theme.CarSpacing
 fun MediaRoute(
     state: MediaState,
     controller: MediaSessionController,
+    onSelectSession: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
     MediaScreen(
         state = state,
+        onSelectSession = onSelectSession,
         onClose = onClose,
         onRequestAccess = {
             context.startActivity(
@@ -84,6 +90,7 @@ fun MediaRoute(
 @Composable
 fun MediaScreen(
     state: MediaState,
+    onSelectSession: (String) -> Unit,
     onClose: () -> Unit,
     onRequestAccess: () -> Unit,
     onOpenSource: () -> Unit,
@@ -130,6 +137,7 @@ fun MediaScreen(
 
             else -> MediaNowPlaying(
                 state = state,
+                onSelectSession = onSelectSession,
                 onOpenSource = onOpenSource,
                 onPlayPause = onPlayPause,
                 onPrevious = onPrevious,
@@ -145,6 +153,7 @@ fun MediaScreen(
 @Composable
 private fun MediaNowPlaying(
     state: MediaState,
+    onSelectSession: (String) -> Unit,
     onOpenSource: () -> Unit,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
@@ -153,62 +162,50 @@ private fun MediaNowPlaying(
     onShuffle: () -> Unit,
     onFavorite: () -> Unit,
 ) {
+    val sessions = state.availableSessions.ifEmpty {
+        listOfNotNull(state.selectedSession)
+    }
+    if (sessions.isEmpty()) return
+
+    val initialPage = sessions.indexOfFirst { it.id == state.selectedSessionId }
+        .coerceAtLeast(0)
+    val pagerState = rememberPagerState(initialPage = initialPage) { sessions.size }
+    val sessionIds = sessions.map(MediaSourceSession::id)
+    val currentSelectedSessionId = rememberUpdatedState(state.selectedSessionId)
+
+    LaunchedEffect(state.selectedSessionId, sessionIds) {
+        val selectedIndex = sessionIds.indexOf(state.selectedSessionId)
+        if (selectedIndex >= 0 && pagerState.currentPage != selectedIndex) {
+            pagerState.scrollToPage(selectedIndex)
+        }
+    }
+
+    LaunchedEffect(pagerState, sessionIds) {
+        androidx.compose.runtime.snapshotFlow { pagerState.settledPage }
+            .collect { page ->
+                val id = sessionIds.getOrNull(page) ?: return@collect
+                if (id != currentSelectedSessionId.value) {
+                    onSelectSession(id)
+                }
+            }
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 24.dp, vertical = 8.dp),
-        contentAlignment = Alignment.Center,
+            .clip(CarShapes.medium),
     ) {
-        val artworkSize = if (maxHeight >= 500.dp) 280.dp else 170.dp
+        val artworkSize = if (maxHeight >= 500.dp) 300.dp else 178.dp
 
-        Column(
-            modifier = Modifier
-                .widthIn(max = 1032.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AlbumArtwork(
-                    state = state,
-                    modifier = Modifier.size(artworkSize),
-                )
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(artworkSize),
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    Text(
-                        text = state.title.ifBlank { "Unknown track" },
-                        color = CarColors.TextPrimary,
-                        style = MaterialTheme.typography.headlineMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = state.artist.ifBlank { state.source?.label.orEmpty() },
-                        color = CarColors.TextSecondary,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(modifier = Modifier.height(18.dp))
-                    MediaProgress(state = state)
-                    Spacer(modifier = Modifier.height(18.dp))
-                    state.source?.let { source ->
-                        SourceChip(source = source, onClick = onOpenSource)
-                    }
-                }
-            }
-
-            MediaActions(
-                state = state,
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1,
+        ) { page ->
+            MediaPlayerPage(
+                session = sessions[page],
+                artworkSize = artworkSize,
+                onOpenSource = onOpenSource,
                 onPlayPause = onPlayPause,
                 onPrevious = onPrevious,
                 onNext = onNext,
@@ -217,12 +214,137 @@ private fun MediaNowPlaying(
                 onFavorite = onFavorite,
             )
         }
+
+        MediaSourceDots(
+            count = sessions.size,
+            selectedIndex = pagerState.currentPage,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 20.dp, end = 24.dp),
+        )
+    }
+}
+
+@Composable
+private fun MediaPlayerPage(
+    session: MediaSourceSession,
+    artworkSize: androidx.compose.ui.unit.Dp,
+    onOpenSource: () -> Unit,
+    onPlayPause: () -> Unit,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onRepeat: () -> Unit,
+    onShuffle: () -> Unit,
+    onFavorite: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        session.artwork?.let { artwork ->
+            Image(
+                bitmap = artwork.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alpha = 0.28f,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        0f to Color.Black.copy(alpha = 0.80f),
+                        0.58f to Color.Black.copy(alpha = 0.62f),
+                        1f to Color.Black.copy(alpha = 0.78f),
+                    ),
+                ),
+        )
+
+        session.source?.let { source ->
+            Surface(
+                onClick = onOpenSource,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 12.dp, start = 18.dp),
+                color = Color.Black.copy(alpha = 0.24f),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    source.icon?.let { icon ->
+                        Image(
+                            bitmap = icon.asImageBitmap(),
+                            contentDescription = source.label,
+                            modifier = Modifier.size(30.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                    Text(
+                        text = source.label,
+                        color = Color.White.copy(alpha = 0.88f),
+                        style = MaterialTheme.typography.labelLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 28.dp, vertical = 26.dp),
+            horizontalArrangement = Arrangement.spacedBy(30.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AlbumArtwork(
+                session = session,
+                modifier = Modifier.size(artworkSize),
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .widthIn(max = 680.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    text = session.title.ifBlank { "Unknown track" },
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = session.artist.ifBlank { session.source?.label.orEmpty() },
+                    color = Color.White.copy(alpha = 0.76f),
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(modifier = Modifier.height(22.dp))
+                MediaProgress(session = session)
+                Spacer(modifier = Modifier.height(14.dp))
+                MediaActions(
+                    session = session,
+                    onPlayPause = onPlayPause,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    onRepeat = onRepeat,
+                    onShuffle = onShuffle,
+                    onFavorite = onFavorite,
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun AlbumArtwork(
-    state: MediaState,
+    session: MediaSourceSession,
     modifier: Modifier,
 ) {
     Surface(
@@ -230,7 +352,7 @@ private fun AlbumArtwork(
         color = CarColors.SurfaceContainer,
         shape = CarShapes.small,
     ) {
-        val artwork = state.artwork
+        val artwork = session.artwork
         if (artwork != null) {
             Image(
                 bitmap = artwork.asImageBitmap(),
@@ -252,66 +374,25 @@ private fun AlbumArtwork(
 }
 
 @Composable
-private fun MediaProgress(state: MediaState) {
+private fun MediaProgress(session: MediaSourceSession) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(CarColors.Outline, RoundedCornerShape(4.dp)),
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(state.progress)
-                    .height(4.dp)
-                    .background(CarColors.TextPrimary, RoundedCornerShape(4.dp)),
-            )
-        }
-        Text(
-            text = "${formatDuration(state.positionMs)} / ${formatDuration(state.durationMs)}",
-            color = CarColors.TextSecondary,
-            style = MaterialTheme.typography.bodyMedium,
+        WavyProgressBar(
+            progress = session.progress,
+            modifier = Modifier.fillMaxWidth(),
         )
-    }
-}
-
-@Composable
-private fun SourceChip(
-    source: MediaSource,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(28.dp),
-        color = CarColors.SurfaceElevated,
-    ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            source.icon?.let { icon ->
-                Image(
-                    bitmap = icon.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                )
-            }
             Text(
-                text = source.label,
-                color = CarColors.TextPrimary,
-                style = MaterialTheme.typography.labelLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                text = formatDuration(session.positionMs),
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodyMedium,
             )
-            Icon(
-                imageVector = Icons.Rounded.Launch,
-                contentDescription = "Open ${source.label}",
-                modifier = Modifier.size(20.dp),
-                tint = CarColors.TextSecondary,
+            Text(
+                text = formatDuration(session.durationMs),
+                color = Color.White.copy(alpha = 0.72f),
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
     }
@@ -319,7 +400,7 @@ private fun SourceChip(
 
 @Composable
 private fun MediaActions(
-    state: MediaState,
+    session: MediaSourceSession,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -334,46 +415,46 @@ private fun MediaActions(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (state.controls.canShuffle) {
+        if (session.controls.canShuffle) {
             MediaAction(
                 icon = Icons.Rounded.Shuffle,
                 contentDescription = "Shuffle",
-                selected = state.isShuffleEnabled == true,
+                selected = session.isShuffleEnabled == true,
                 onClick = onShuffle,
             )
         }
-        if (state.controls.canFavorite) {
+        if (session.controls.canFavorite) {
             MediaAction(
-                icon = if (state.isFavorite == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                icon = if (session.isFavorite == true) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                 contentDescription = "Favorite",
-                selected = state.isFavorite == true,
+                selected = session.isFavorite == true,
                 onClick = onFavorite,
             )
         }
         MediaAction(
             icon = Icons.Rounded.SkipPrevious,
             contentDescription = "Previous",
-            enabled = state.controls.canSkipPrevious,
+            enabled = session.controls.canSkipPrevious,
             onClick = onPrevious,
         )
         MediaAction(
-            icon = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-            contentDescription = if (state.isPlaying) "Pause" else "Play",
-            enabled = state.controls.canPlayPause,
+            icon = if (session.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+            contentDescription = if (session.isPlaying) "Pause" else "Play",
+            enabled = session.controls.canPlayPause,
             primary = true,
             onClick = onPlayPause,
         )
         MediaAction(
             icon = Icons.Rounded.SkipNext,
             contentDescription = "Next",
-            enabled = state.controls.canSkipNext,
+            enabled = session.controls.canSkipNext,
             onClick = onNext,
         )
-        if (state.controls.canRepeat) {
+        if (session.controls.canRepeat) {
             MediaAction(
-                icon = if (state.isRepeatEnabled == true) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                icon = if (session.isRepeatEnabled == true) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
                 contentDescription = "Repeat",
-                selected = state.isRepeatEnabled == true,
+                selected = session.isRepeatEnabled == true,
                 onClick = onRepeat,
             )
         }
@@ -435,7 +516,7 @@ private fun MediaAccessRequired(onRequestAccess: () -> Unit) {
                 style = MaterialTheme.typography.headlineMedium,
             )
             Text(
-                text = "Enable Open Launcher under Notification access so it can read and control active media sessions.",
+                text = "Enable Car Launcher under Notification access so it can read and control active media sessions.",
                 color = CarColors.TextSecondary,
                 style = MaterialTheme.typography.bodyLarge,
             )

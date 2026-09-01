@@ -28,6 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +47,10 @@ import com.openlauncher.app.design.component.CarListRow
 import com.openlauncher.app.design.component.CarSwitch
 import com.openlauncher.app.design.theme.CarColors
 import com.openlauncher.app.design.theme.CarSpacing
+import com.openlauncher.app.feature.navigation.offline.OfflineMapRegion
+import com.openlauncher.app.feature.navigation.offline.OfflineMapRegionState
 import com.openlauncher.app.launcher.LauncherApp
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsRoute(stateHolder: SettingsStateHolder) {
@@ -67,6 +71,9 @@ fun SettingsRoute(stateHolder: SettingsStateHolder) {
         onPreferredMediaAppChange = stateHolder::setPreferredMediaApp,
         onNavigationAppChange = stateHolder::setNavigationApp,
         onCompatibilityModeChange = stateHolder::setNavigationCompatibilityMode,
+        onOfflineMapDownload = stateHolder::downloadOfflineMap,
+        onOfflineMapCancel = stateHolder::cancelOfflineMapDownload,
+        onOfflineMapDelete = stateHolder::deleteOfflineMap,
         onCopyDiagnostics = { copyDiagnostics(context, diagnostics.copyText) },
     )
 }
@@ -84,6 +91,9 @@ fun SettingsScreen(
     onPreferredMediaAppChange: (LauncherApp?) -> Unit,
     onNavigationAppChange: (LauncherApp?) -> Unit,
     onCompatibilityModeChange: (Boolean) -> Unit,
+    onOfflineMapDownload: (String) -> Unit,
+    onOfflineMapCancel: (String) -> Unit,
+    onOfflineMapDelete: (String) -> Unit,
     onCopyDiagnostics: () -> Unit,
 ) {
     var panel by rememberSaveable { mutableStateOf(SettingsPanel.Main.name) }
@@ -105,6 +115,7 @@ fun SettingsScreen(
                 onOpenTextSize = { panel = SettingsPanel.TextSize.name },
                 onOpenMediaApp = { panel = SettingsPanel.MediaApp.name },
                 onOpenNavigationApp = { panel = SettingsPanel.NavigationApp.name },
+                onOpenOfflineMaps = { panel = SettingsPanel.OfflineMaps.name },
                 onCompatibilityModeChange = onCompatibilityModeChange,
                 onCopyDiagnostics = onCopyDiagnostics,
             )
@@ -150,6 +161,14 @@ fun SettingsScreen(
                     panel = SettingsPanel.Main.name
                 },
             )
+
+            SettingsPanel.OfflineMaps -> OfflineMapsManager(
+                regions = state.offlineMapRegions,
+                onBack = { panel = SettingsPanel.Main.name },
+                onDownload = onOfflineMapDownload,
+                onCancel = onOfflineMapCancel,
+                onDelete = onOfflineMapDelete,
+            )
         }
     }
 }
@@ -166,6 +185,7 @@ private fun SettingsList(
     onOpenTextSize: () -> Unit,
     onOpenMediaApp: () -> Unit,
     onOpenNavigationApp: () -> Unit,
+    onOpenOfflineMaps: () -> Unit,
     onCompatibilityModeChange: (Boolean) -> Unit,
     onCopyDiagnostics: () -> Unit,
 ) {
@@ -187,9 +207,9 @@ private fun SettingsList(
             settingRow(
                 title = "Home app",
                 subtitle = if (isDefaultHome) {
-                    "OpenLauncher is the default Home app"
+                    "Car Launcher is the default Home app"
                 } else {
-                    "Choose OpenLauncher as your Home app"
+                    "Choose Car Launcher as your Home app"
                 },
                 onClick = onOpenHomeSettings,
                 showChevron = true,
@@ -249,6 +269,12 @@ private fun SettingsList(
                 showChevron = true,
             )
             settingRow(
+                title = "Offline maps",
+                subtitle = offlineMapsSummary(state.offlineMapRegions),
+                onClick = onOpenOfflineMaps,
+                showChevron = true,
+            )
+            settingRow(
                 title = "Embedded navigation",
                 subtitle = if (settings.navigationAppKey == null) {
                     "Choose a navigation app first"
@@ -269,7 +295,7 @@ private fun SettingsList(
             )
 
             section("System / diagnostics")
-            settingRow(title = "OpenLauncher", subtitle = "Version ${diagnostics.appVersion}")
+            settingRow(title = "Car Launcher", subtitle = "Version ${diagnostics.appVersion}")
             settingRow(title = "Android", subtitle = diagnostics.android)
             settingRow(title = "Architecture", subtitle = diagnostics.abi)
             settingRow(title = "Display", subtitle = diagnostics.display)
@@ -282,6 +308,100 @@ private fun SettingsList(
             )
         }
     }
+}
+
+@Composable
+private fun OfflineMapsManager(
+    regions: List<OfflineMapRegion>,
+    onBack: () -> Unit,
+    onDownload: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onDelete: (String) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = SettingsContentWidth)
+            .fillMaxSize(),
+    ) {
+        SettingsSubpageHeader(title = "Offline maps", onBack = onBack)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = CarSpacing.Lg),
+        ) {
+            if (regions.isEmpty()) {
+                item(key = "offline-maps-unavailable") {
+                    settingRowContent(
+                        title = "Map downloads are not available yet",
+                        subtitle = "The download manager shell is ready; the native map catalog and downloader are not connected in this build.",
+                    )
+                }
+            } else {
+                items(items = regions, key = OfflineMapRegion::id) { region ->
+                    settingRowContent(
+                        title = region.name,
+                        subtitle = offlineMapRegionSubtitle(region),
+                        trailing = offlineMapAction(
+                            region = region,
+                            onDownload = onDownload,
+                            onCancel = onCancel,
+                            onDelete = onDelete,
+                        ),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun offlineMapsSummary(regions: List<OfflineMapRegion>): String {
+    val downloaded = regions.count { it.state == OfflineMapRegionState.Downloaded }
+    return when {
+        regions.isEmpty() -> "Download manager shell · backend not connected"
+        downloaded == 0 -> "No regions downloaded"
+        downloaded == 1 -> "1 region downloaded"
+        else -> "$downloaded regions downloaded"
+    }
+}
+
+private fun offlineMapRegionSubtitle(region: OfflineMapRegion): String {
+    val size = region.estimatedSizeBytes?.let(::formatBytes)
+    val state = when (region.state) {
+        OfflineMapRegionState.NotDownloaded -> "Not downloaded"
+        OfflineMapRegionState.Queued -> "Queued"
+        OfflineMapRegionState.Downloading -> "${(region.progress.coerceIn(0f, 1f) * 100).roundToInt()}% downloaded"
+        OfflineMapRegionState.Downloaded -> "Downloaded"
+        OfflineMapRegionState.Failed -> region.errorMessage ?: "Download failed"
+    }
+    return listOfNotNull(region.detail, size, state).joinToString(" · ")
+}
+
+private fun offlineMapAction(
+    region: OfflineMapRegion,
+    onDownload: (String) -> Unit,
+    onCancel: (String) -> Unit,
+    onDelete: (String) -> Unit,
+): @Composable () -> Unit = {
+    when (region.state) {
+        OfflineMapRegionState.NotDownloaded,
+        OfflineMapRegionState.Failed,
+        -> TextButton(onClick = { onDownload(region.id) }) { Text("Download") }
+
+        OfflineMapRegionState.Queued,
+        OfflineMapRegionState.Downloading,
+        -> TextButton(onClick = { onCancel(region.id) }) { Text("Cancel") }
+
+        OfflineMapRegionState.Downloaded ->
+            TextButton(onClick = { onDelete(region.id) }) { Text("Delete") }
+    }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1_024L) return "$bytes B"
+    val kib = bytes / 1_024.0
+    if (kib < 1_024.0) return "${kib.roundToInt()} KB"
+    val mib = kib / 1_024.0
+    if (mib < 1_024.0) return "${mib.roundToInt()} MB"
+    return "${((mib / 1_024.0) * 10).roundToInt() / 10.0} GB"
 }
 
 @Composable
@@ -445,7 +565,7 @@ data class DeviceDiagnostics(
     val permissions: String,
 ) {
     val copyText: String = listOf(
-        "OpenLauncher $appVersion",
+        "Car Launcher $appVersion",
         android,
         "ABI: $abi",
         "Display: $display",
@@ -481,6 +601,7 @@ private enum class SettingsPanel {
     TextSize,
     MediaApp,
     NavigationApp,
+    OfflineMaps,
 }
 
 private val SettingsContentWidth = 1032.dp
@@ -508,7 +629,7 @@ private fun openSystemSettings(context: Context, action: String) {
 
 private fun copyDiagnostics(context: Context, diagnostics: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    clipboard.setPrimaryClip(ClipData.newPlainText("OpenLauncher diagnostics", diagnostics))
+    clipboard.setPrimaryClip(ClipData.newPlainText("Car Launcher diagnostics", diagnostics))
     Toast.makeText(context, "Diagnostics copied", Toast.LENGTH_SHORT).show()
 }
 

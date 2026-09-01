@@ -92,12 +92,13 @@ fun LauncherShell(
                         .fillMaxHeight(),
                 )
 
-                LauncherSurface(
+                Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
                         .padding(
                             top = CarSpacing.Md,
+                            start = CarSpacing.Md,
                             end = CarSpacing.Md,
                             bottom = CarSpacing.Md,
                         ),

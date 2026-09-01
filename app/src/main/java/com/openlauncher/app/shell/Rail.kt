@@ -1,10 +1,14 @@
 package com.openlauncher.app.shell
 
+import android.content.pm.ApplicationInfo
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,9 +21,13 @@ import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.openlauncher.app.design.component.CarRailButton
@@ -27,6 +35,8 @@ import com.openlauncher.app.design.theme.CarColors
 import com.openlauncher.app.design.theme.CarDimensions
 import com.openlauncher.app.design.theme.CarShapes
 import com.openlauncher.app.design.theme.CarSpacing
+import com.openlauncher.app.launcher.LauncherApp
+import com.openlauncher.app.launcher.rememberAppsStateHolder
 
 enum class RailOrientation {
     Horizontal,
@@ -42,70 +52,148 @@ fun Rail(
     orientation: RailOrientation = RailOrientation.Vertical,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val isDebuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    val appsStateHolder = rememberAppsStateHolder()
+    val pinnedApps = appsStateHolder.uiState.apps
+        .filter(appsStateHolder.uiState::isPinned)
+        .take(MaxDockApps)
+    val dockApps = if (pinnedApps.isNotEmpty() || !isDebuggable) {
+        pinnedApps
+    } else {
+        appsStateHolder.uiState.apps.take(MaxDockApps)
+    }
+
     if (orientation == RailOrientation.Horizontal) {
         Row(
             modifier = modifier
                 .fillMaxWidth()
+                .background(Color.Black)
                 .padding(horizontal = CarSpacing.Md, vertical = CarSpacing.Sm),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.Start,
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            AppLauncherButton(selected, onDestinationSelected)
+            CarRailButton(
+                icon = Icons.Rounded.Mic,
+                contentDescription = "Digital assistant",
+                selected = false,
+                onClick = onAssistantClick,
+            )
+            AppDock(
+                apps = dockApps,
+                onAppClick = appsStateHolder::launch,
+                iconLoader = appsStateHolder::loadIcon,
+                horizontal = true,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            NotificationRailButton(
+                count = notificationCount,
+                selected = selected == ShellDestination.Notifications,
+                onClick = { onDestinationSelected(ShellDestination.Notifications) },
+            )
+            StatusArea()
+        }
+    } else {
+        Box(
+            modifier = modifier
+                .fillMaxHeight()
+                .background(Color.Black)
+                .padding(vertical = CarSpacing.Xl),
+        ) {
+            Column(
+                modifier = Modifier.align(Alignment.TopCenter),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(RailItemSpacing),
             ) {
-                AppLauncherButton(selected, onDestinationSelected)
+                StatusArea()
+                NotificationRailButton(
+                    count = notificationCount,
+                    selected = selected == ShellDestination.Notifications,
+                    onClick = { onDestinationSelected(ShellDestination.Notifications) },
+                )
+            }
+
+            AppDock(
+                apps = dockApps,
+                onAppClick = appsStateHolder::launch,
+                iconLoader = appsStateHolder::loadIcon,
+                horizontal = false,
+                modifier = Modifier.align(Alignment.Center),
+            )
+
+            Column(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(RailItemSpacing),
+            ) {
                 CarRailButton(
                     icon = Icons.Rounded.Mic,
                     contentDescription = "Digital assistant",
                     selected = false,
                     onClick = onAssistantClick,
                 )
+                AppLauncherButton(selected, onDestinationSelected)
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                NotificationRailButton(
-                    count = notificationCount,
-                    selected = selected == ShellDestination.Notifications,
-                    onClick = { onDestinationSelected(ShellDestination.Notifications) },
-                )
-                StatusArea()
+        }
+    }
+}
+
+@Composable
+private fun AppDock(
+    apps: List<LauncherApp>,
+    onAppClick: (LauncherApp) -> Unit,
+    iconLoader: suspend (LauncherApp) -> ImageBitmap?,
+    horizontal: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (apps.isEmpty()) return
+
+    if (horizontal) {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            apps.forEach { app ->
+                DockAppButton(app, onAppClick, iconLoader)
             }
         }
     } else {
         Column(
-            modifier = modifier
-                .fillMaxHeight()
-                .padding(vertical = CarSpacing.Md),
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                AppLauncherButton(selected, onDestinationSelected)
-                CarRailButton(
-                    icon = Icons.Rounded.Mic,
-                    contentDescription = "Digital assistant",
-                    selected = false,
-                    onClick = onAssistantClick,
-                )
+            apps.forEach { app ->
+                DockAppButton(app, onAppClick, iconLoader)
             }
+        }
+    }
+}
 
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                NotificationRailButton(
-                    count = notificationCount,
-                    selected = selected == ShellDestination.Notifications,
-                    onClick = { onDestinationSelected(ShellDestination.Notifications) },
-                )
-                StatusArea()
-            }
+@Composable
+private fun DockAppButton(
+    app: LauncherApp,
+    onAppClick: (LauncherApp) -> Unit,
+    iconLoader: suspend (LauncherApp) -> ImageBitmap?,
+) {
+    val icon by produceState<ImageBitmap?>(initialValue = null, key1 = app.stableKey) {
+        value = iconLoader(app)
+    }
+
+    Box(
+        modifier = Modifier
+            .size(CarDimensions.RailActionSize)
+            .clickable(onClick = { onAppClick(app) }),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (icon != null) {
+            Image(
+                bitmap = icon!!,
+                contentDescription = app.label,
+                modifier = Modifier.size(40.dp),
+            )
         }
     }
 }
@@ -158,3 +246,6 @@ private fun NotificationRailButton(
         }
     }
 }
+
+private const val MaxDockApps = 3
+private val RailItemSpacing = 2.dp

@@ -38,3 +38,33 @@ Thumbs.db
 
 # Kotlin
 .kotlin/
+
+# Local research and reverse-engineering artifacts
+/.codex-apk-*/
+/inspiration/
+/research/
+*.apk
+*.apks
+*.xapk
+*.odex
+*.vdex
+
+# Private planning, paid-edition work, and local agent configuration
+/AGENTS.md
+/plan.md
+/paid/
+/premium/
+app/src/debug/
+/.agents/
+/.claude/
+/skills-lock.json
+
+# Design source files and local visual research
+/*.fig
+/*.pen
+/artwork/
+/assets/
+/Screenshots/
+/Screenshots /
+/image-import-*
+/SFX/

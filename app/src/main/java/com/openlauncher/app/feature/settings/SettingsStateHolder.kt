@@ -13,6 +13,9 @@ import com.openlauncher.app.data.settings.LauncherSettings
 import com.openlauncher.app.data.settings.SettingsRepository
 import com.openlauncher.app.data.settings.StartupScreen
 import com.openlauncher.app.data.settings.TextSizePreset
+import com.openlauncher.app.feature.navigation.offline.OfflineMapRegion
+import com.openlauncher.app.feature.navigation.offline.OfflineMapRepository
+import com.openlauncher.app.feature.navigation.offline.UnavailableOfflineMapRepository
 import com.openlauncher.app.launcher.AppCatalog
 import com.openlauncher.app.launcher.LauncherApp
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +27,7 @@ data class SettingsUiState(
     val settings: LauncherSettings = LauncherSettings(),
     val pinnedAppCount: Int = 0,
     val apps: List<LauncherApp> = emptyList(),
+    val offlineMapRegions: List<OfflineMapRegion> = emptyList(),
 )
 
 @Stable
@@ -31,6 +35,7 @@ class SettingsStateHolder(
     private val settingsRepository: SettingsRepository,
     private val pinnedAppsRepository: PinnedAppsRepository,
     private val appCatalog: AppCatalog,
+    private val offlineMapRepository: OfflineMapRepository,
     private val scope: CoroutineScope,
 ) {
     var uiState by mutableStateOf(SettingsUiState())
@@ -51,6 +56,12 @@ class SettingsStateHolder(
             refreshApps()
             appCatalog.packageChanges().collectLatest { refreshApps() }
         }
+        scope.launch {
+            offlineMapRepository.regions.collectLatest { regions ->
+                uiState = uiState.copy(offlineMapRegions = regions)
+            }
+        }
+        scope.launch { offlineMapRepository.refresh() }
     }
 
     fun setStartOnBoot(enabled: Boolean) = update { settingsRepository.setStartOnBoot(enabled) }
@@ -69,6 +80,18 @@ class SettingsStateHolder(
 
     fun setNavigationCompatibilityMode(enabled: Boolean) = update {
         settingsRepository.setNavigationCompatibilityMode(enabled)
+    }
+
+    fun downloadOfflineMap(regionId: String) = update {
+        offlineMapRepository.download(regionId)
+    }
+
+    fun cancelOfflineMapDownload(regionId: String) = update {
+        offlineMapRepository.cancel(regionId)
+    }
+
+    fun deleteOfflineMap(regionId: String) = update {
+        offlineMapRepository.delete(regionId)
     }
 
     private fun update(block: suspend () -> Unit) {
@@ -90,6 +113,7 @@ fun rememberSettingsStateHolder(): SettingsStateHolder {
             settingsRepository = SettingsRepository(context),
             pinnedAppsRepository = PinnedAppsRepository(context),
             appCatalog = AppCatalog(context),
+            offlineMapRepository = UnavailableOfflineMapRepository,
             scope = scope,
         )
     }

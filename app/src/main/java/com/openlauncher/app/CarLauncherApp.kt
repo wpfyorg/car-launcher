@@ -19,6 +19,9 @@ import com.openlauncher.app.design.theme.CarTheme
 import com.openlauncher.app.feature.home.HomeRoute
 import com.openlauncher.app.feature.media.AndroidMediaRepository
 import com.openlauncher.app.feature.media.MediaRoute
+import com.openlauncher.app.feature.navigation.NavigationError
+import com.openlauncher.app.feature.navigation.NavigationState
+import com.openlauncher.app.feature.navigation.external.DistributionNavigationHomeContent
 import com.openlauncher.app.feature.notifications.AndroidNotificationRepository
 import com.openlauncher.app.feature.notifications.NotificationRoute
 import com.openlauncher.app.feature.settings.SettingsRoute
@@ -30,7 +33,7 @@ import com.openlauncher.app.shell.ShellDestination
 import com.openlauncher.app.shell.rememberShellState
 
 @Composable
-fun OpenLauncherApp() {
+fun CarLauncherApp() {
     val context = LocalContext.current
     val isDebuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     val settingsStateHolder = rememberSettingsStateHolder()
@@ -74,19 +77,42 @@ fun OpenLauncherApp() {
                 state = shellState,
             ) { destination, navigateTo ->
                 when (destination) {
-                    ShellDestination.Home -> HomeRoute(
-                        mediaState = mediaState,
-                        onMediaClick = { navigateTo(ShellDestination.Media) },
-                        onMediaPlayPause = mediaRepository.sessionController::playPause,
-                        onMediaPrevious = mediaRepository.sessionController::previous,
-                        onMediaNext = mediaRepository.sessionController::next,
-                    )
+                    ShellDestination.Home -> {
+                        val navigationAppKey = settingsState.settings.navigationAppKey
+                        val navigationApp = settingsState.apps.firstOrNull {
+                            it.stableKey == navigationAppKey
+                        }
+                        HomeRoute(
+                            navigationState = NavigationState(
+                                error = if (navigationAppKey != null && navigationApp == null) {
+                                    NavigationError.ProviderUnavailable
+                                } else {
+                                    null
+                                },
+                            ),
+                            navigationContent = {
+                                DistributionNavigationHomeContent(
+                                    app = navigationApp,
+                                    compatibilityMode = settingsState.settings.navigationCompatibilityMode,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            },
+                            onNavigationClick = { navigateTo(ShellDestination.Settings) },
+                            mediaState = mediaState,
+                            onMediaClick = { navigateTo(ShellDestination.Media) },
+                            onMediaSessionSelect = mediaRepository::selectSession,
+                            onMediaPlayPause = mediaRepository.sessionController::playPause,
+                            onMediaPrevious = mediaRepository.sessionController::previous,
+                            onMediaNext = mediaRepository.sessionController::next,
+                        )
+                    }
                     ShellDestination.Apps -> AppsRoute(
                         onOpenSettings = { navigateTo(ShellDestination.Settings) },
                     )
                     ShellDestination.Media -> MediaRoute(
                         state = mediaState,
                         controller = mediaRepository.sessionController,
+                        onSelectSession = mediaRepository::selectSession,
                         onClose = { navigateTo(ShellDestination.Home) },
                     )
                     ShellDestination.Notifications -> NotificationRoute(

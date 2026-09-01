@@ -456,11 +456,9 @@ Keep this semantic order fixed. Render it **left → right** on the horizontal r
 
 1. **App launcher** — opens the installed-app grid.
 2. **Digital assistant** — launches the configured assistant/voice action.
-3. **Context/content area** — weather when reliable weather data is available; otherwise media takes over this area. Notifications never occupy this slot.
-4. **App dock** — user-selected shortcuts with user-controlled ordering; persist both membership and order.
-5. **Navigation bar / navigation affordance** — route/navigation controls appropriate to the current state/layout.
-6. **Notification center badge** — badge/count only in the rail; activating it opens Notification Center. Do not render a notification card/tile in the dashboard context area.
-7. **Clock**.
+3. **App dock** — user-selected shortcuts with user-controlled ordering; persist both membership and order.
+4. **Notification center badge** — badge/count only in the rail; activating it opens Notification Center. Do not render a notification card/tile in the dashboard context area.
+5. **Clock**.
 
 The rail may compact spacing or icon treatment for a smaller viewport, but it must not reorder these semantic regions.
 
@@ -652,7 +650,7 @@ This is the large widescreen family and uses the `.pen` side-by-side composition
 
 Across all breakpoints/families:
 
-- rail order is always App launcher → Digital assistant → Context/content → App dock → Navigation bar → Notification badge → Clock;
+- rail order is always App launcher → Digital assistant → App dock → Notification badge → Clock;
 - the context/content region prefers **weather** when available and reliable, otherwise **media** takes over;
 - notifications are never a dashboard/context tile; only the rail badge opens Notification Center;
 - the app dock is user-configurable and user-arrangeable;
@@ -813,6 +811,13 @@ On a head unit, avoid forcing a large soft keyboard until the user explicitly fo
 
 # 16. Phase 10 — Shared Navigation Contracts
 
+**Status: Complete (2026-09-01).**
+
+The shared navigation models are implemented and consumed by the Home
+dashboard/turn-card UI. The Android framework location abstraction and
+`RoutingEngine` boundary are also in place, and the Phase 10 debug build has
+been verified successfully.
+
 Before implementing either Free or Paid maps, define one shared UI model.
 
 ## Models
@@ -848,6 +853,66 @@ The dashboard and turn cards consume this contract regardless of whether navigat
 
 ---
 
+# Branch Execution Strategy
+
+Use milestone branches that group phases which naturally depend on each other.
+Finish, review, and merge each branch into `main` before creating the next
+milestone branch from the updated `main`.
+
+```text
+phase-10
+    Phase 10 — Shared Navigation Contracts [COMPLETE]
+
+        ↓
+
+free-navigation
+    Phase 11 — Free Build: External App Embedding POC
+    Phase 12 — Product Flavors
+    Phase 13 — Integrate Free Navigation Into Home
+
+        ↓
+
+native-navigation-core
+    Phase 14 — Paid Build: MapLibre Hardware POC
+    Phase 15 — Paid Routing Architecture
+    Phase 16 — Ferrostar Navigation Session
+
+        ↓
+
+offline-navigation
+    Phase 17 — Native Offline Valhalla
+    Phase 18 — Offline Region Packages
+    Phase 19 — Offline Download Manager
+    Phase 20 — Offline POI Search
+
+        ↓
+
+navigation-polish
+    Phase 21 — Voice Guidance
+    Phase 22 — Location Architecture
+
+        ↓
+
+platform-hardening
+    Phase 23 — Persistence
+    Phase 24 — Performance Budget
+    Phase 25 — Hardware/ROM Compatibility Layer
+```
+
+Branch goals:
+
+- `free-navigation` delivers the usable Free/GitHub navigation milestone.
+- `native-navigation-core` proves and establishes the Paid/native map and routing foundation.
+- `offline-navigation` owns the complete offline routing, region, download, and POI stack.
+- `navigation-polish` adds runtime navigation quality features after the native/offline foundation is stable.
+- `platform-hardening` is the final persistence, performance, and head-unit compatibility pass.
+
+Keep PRs milestone-sized: merge the current milestone into `main`, then branch
+the next milestone from that merged state instead of maintaining a long chain
+of dependent PR branches.
+
+---
+
 # 17. Phase 11 — Free Build: External App Embedding POC
 
 Do this as a dedicated technical experiment before wiring it into the dashboard.
@@ -879,6 +944,33 @@ setFocusedStack
 ## Step 11.1 — controlled activity
 
 First embed an OpenLauncher-owned test activity into a `VirtualDisplay`.
+
+Current POC status (2026-09-01): the debug source set contains a standalone
+`VirtualDisplayPocActivity` plus an OpenLauncher-owned `EmbeddedProbeActivity`.
+The API 28 emulator can create the `VirtualDisplay`, but reports
+`android.software.activities_on_secondary_displays=false`; Android therefore
+does not provide a valid secondary-activity test environment there. The POC
+now detects this capability and blocks launch rather than allowing the probe
+to fall back onto display 0. Step 11.1 still requires the YT5760D hardware.
+
+Mini AA investigation (2026-09-01): its System build uses hidden AOSP
+`ActivityView` / `TaskView` wrappers rather than standard Android PiP. The
+published System APK is signed with the standard AOSP platform test key and
+uses `android.uid.system`; its published build is Android 10+ (minSdk 29).
+An older API-28-capable v0.4.0 APK contains an `android.app.ActivityView`
+fallback. For Android 9, `ActivityView` is the most relevant compatibility
+path because it owns the virtual display and input forwarding internally.
+OpenLauncher now has a clean-room debug `ActivityViewPocActivity` that checks
+the hidden class, secondary-display feature, `INJECT_EVENTS`, and
+`INTERNAL_SYSTEM_WINDOW` before attaching. The normal emulator cannot grant
+those signature permissions, so this is a system-build/hardware-only path;
+the normal/Play build must not depend on it.
+
+The POC compatibility logic is now separated into `EmbeddingCapabilities`
+and `ActivityViewCompat` in the debug source set. This keeps hidden API
+reflection and signature-permission checks out of `main` while giving the
+future YT5760D Free system source set a small unit that can be moved intact
+after hardware proves the required signing/privilege combination.
 
 Verify:
 
@@ -979,6 +1071,59 @@ TaskManagerCompat
 InputForwarder
 ExternalNavigationAppRepository
 ```
+
+## Media visual refresh
+
+Do the media redesign in this phase rather than interrupting the Phase 11 embedding POC. The source-switching interaction needs the media layer to expose multiple active sessions instead of only the current best session.
+
+Current implementation status (2026-09-01): the media repository now tracks all
+active media sessions, exposes `availableSessions` / `selectedSessionId`, and
+keeps an explicit user-selected session stable until it disappears. Both the
+Home media card and expanded player use artwork-backed layouts, native source
+icons, source-page dots, horizontal session paging, and a wavy progress bar.
+The refreshed Home card and expanded player were rendered on the API 28
+emulator with Auxio playing `Dooron Dooron`. A live two-source swipe still needs
+verification when two simultaneous media sessions are available.
+
+### Expanded media UI
+
+Use the provided full-player references as the visual direction:
+
+- large album art with an artwork-derived blurred/dimmed background;
+- source app logo at the top-left;
+- compact source-page dots at the top-right when multiple media sources are available;
+- horizontal swipe between available media sources/sessions, with the dots tracking the selected source;
+- title and artist remain prominent and readable over the artwork treatment;
+- wavy playback progress bar with elapsed and duration labels;
+- large play/pause plus previous/next controls;
+- shuffle, repeat, favorite, queue, and source-open actions appear only when supported by the active session and when space allows;
+- keep touch targets suitable for in-car use and preserve the existing permission/idle states.
+
+### Home media card
+
+Use the Android Auto media-card reference as the direction:
+
+- album art fills the card background with a dark readability scrim/gradient;
+- source app logo at the top-left;
+- source-page dots at the top-right when alternate active sources exist;
+- horizontal swipe switches the selected media source without opening the expanded player;
+- title/artist sit over the lower portion of the artwork;
+- wavy progress bar;
+- prominent play/pause and next/forward controls;
+- tapping elsewhere on the card opens the expanded media screen.
+
+### Media state changes required
+
+Before building the source pager, extend the media model/repository to expose:
+
+```text
+MediaSourceSession
+availableSessions
+selectedSessionId
+selectSession(id)
+```
+
+The current automatic priority rule can still choose the initial session, but user selection should remain stable while that session exists. Do not let a paused background source steal focus from the source the user explicitly selected.
 
 ## User flow
 

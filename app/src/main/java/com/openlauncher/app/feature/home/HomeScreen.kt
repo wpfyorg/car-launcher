@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AltRoute
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -37,9 +40,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,19 +57,38 @@ import androidx.compose.ui.unit.dp
 import com.openlauncher.app.design.theme.CarColors
 import com.openlauncher.app.design.theme.CarShapes
 import com.openlauncher.app.design.theme.CarSpacing
+import com.openlauncher.app.feature.media.MediaSourceDots
+import com.openlauncher.app.feature.media.MediaSourceSession
 import com.openlauncher.app.feature.media.MediaState
+import com.openlauncher.app.feature.media.WavyProgressBar
+import com.openlauncher.app.feature.navigation.Maneuver
+import com.openlauncher.app.feature.navigation.NavigationError
+import com.openlauncher.app.feature.navigation.NavigationProgress
+import com.openlauncher.app.feature.navigation.NavigationState
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlinx.coroutines.flow.collect
 
 @Composable
 fun HomeRoute(
+    navigationState: NavigationState = NavigationState(),
+    navigationContent: @Composable BoxScope.() -> Unit = {},
+    onNavigationClick: () -> Unit = {},
     mediaState: MediaState,
     onMediaClick: () -> Unit,
+    onMediaSessionSelect: (String) -> Unit,
     onMediaPlayPause: () -> Unit,
     onMediaPrevious: () -> Unit,
     onMediaNext: () -> Unit,
 ) {
     HomeScreen(
-        state = HomeUiState(media = mediaState),
+        state = HomeUiState(navigation = navigationState, media = mediaState),
+        navigationContent = navigationContent,
+        onSearchClick = onNavigationClick,
         onMediaClick = onMediaClick,
+        onMediaSessionSelect = onMediaSessionSelect,
         onMediaPlayPause = onMediaPlayPause,
         onMediaPrevious = onMediaPrevious,
         onMediaNext = onMediaNext,
@@ -73,9 +98,11 @@ fun HomeRoute(
 @Composable
 fun HomeScreen(
     state: HomeUiState,
+    navigationContent: @Composable BoxScope.() -> Unit = {},
     onSearchClick: () -> Unit = {},
     onStopNavigation: () -> Unit = {},
     onMediaClick: () -> Unit = {},
+    onMediaSessionSelect: (String) -> Unit = {},
     onMediaPlayPause: () -> Unit = {},
     onMediaPrevious: () -> Unit = {},
     onMediaNext: () -> Unit = {},
@@ -97,6 +124,7 @@ fun HomeScreen(
             ) {
                 NavigationSurface(
                     state = state.navigation,
+                    navigationContent = navigationContent,
                     onSearchClick = onSearchClick,
                     onStopNavigation = onStopNavigation,
                     modifier = Modifier
@@ -107,6 +135,7 @@ fun HomeScreen(
                 MediaCard(
                     state = state.media,
                     onClick = onMediaClick,
+                    onSessionSelect = onMediaSessionSelect,
                     onPlayPause = onMediaPlayPause,
                     onPrevious = onMediaPrevious,
                     onNext = onMediaNext,
@@ -117,13 +146,12 @@ fun HomeScreen(
             }
         } else {
             Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = CarSpacing.Md, end = CarSpacing.Md, bottom = CarSpacing.Md),
+                modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(CarSpacing.Md),
             ) {
                 NavigationSurface(
                     state = state.navigation,
+                    navigationContent = navigationContent,
                     onSearchClick = onSearchClick,
                     onStopNavigation = onStopNavigation,
                     modifier = Modifier
@@ -134,6 +162,7 @@ fun HomeScreen(
                 ContextColumn(
                     media = state.media,
                     onMediaClick = onMediaClick,
+                    onMediaSessionSelect = onMediaSessionSelect,
                     onMediaPlayPause = onMediaPlayPause,
                     onMediaPrevious = onMediaPrevious,
                     onMediaNext = onMediaNext,
@@ -146,7 +175,8 @@ fun HomeScreen(
 
 @Composable
 private fun NavigationSurface(
-    state: HomeNavigationState,
+    state: NavigationState,
+    navigationContent: @Composable BoxScope.() -> Unit,
     onSearchClick: () -> Unit,
     onStopNavigation: () -> Unit,
     modifier: Modifier = Modifier,
@@ -154,8 +184,10 @@ private fun NavigationSurface(
     Box(
         modifier = modifier
             .clip(CarShapes.medium)
-            .background(CarColors.Background),
+            .background(CarColors.Surface),
     ) {
+        navigationContent()
+
         Surface(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -174,28 +206,11 @@ private fun NavigationSurface(
             }
         }
 
-        when (state) {
-            is HomeNavigationState.Active -> {
-                TurnCard(
-                    state = state,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(16.dp),
-                )
-                EtaCard(
-                    state = state,
-                    onStopNavigation = onStopNavigation,
-                    onSearchClick = onSearchClick,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(16.dp),
-                )
-            }
-
-            HomeNavigationState.Parked -> NavigationStatusCard(
-                icon = Icons.Rounded.Navigation,
-                title = "Ready to drive",
-                body = "Choose a destination to start navigation",
+        when {
+            state.progress.arrived -> NavigationStatusCard(
+                icon = Icons.Rounded.CheckCircle,
+                title = "You’ve arrived",
+                body = "Route guidance has ended",
                 actionLabel = "Search destination",
                 onAction = onSearchClick,
                 modifier = Modifier
@@ -203,7 +218,7 @@ private fun NavigationSurface(
                     .padding(16.dp),
             )
 
-            HomeNavigationState.GpsUnavailable -> NavigationStatusCard(
+            !state.gpsAvailable -> NavigationStatusCard(
                 icon = Icons.Rounded.LocationOff,
                 title = "GPS unavailable",
                 body = "Waiting for a location fix",
@@ -214,7 +229,7 @@ private fun NavigationSurface(
                     .padding(16.dp),
             )
 
-            HomeNavigationState.NavigationUnavailable -> NavigationStatusCard(
+            state.error == NavigationError.ProviderUnavailable -> NavigationStatusCard(
                 icon = Icons.Rounded.AltRoute,
                 title = "Navigation app unavailable",
                 body = "Choose or install a compatible navigation app",
@@ -225,10 +240,46 @@ private fun NavigationSurface(
                     .padding(16.dp),
             )
 
-            HomeNavigationState.Arrived -> NavigationStatusCard(
-                icon = Icons.Rounded.CheckCircle,
-                title = "You’ve arrived",
-                body = "Route guidance has ended",
+            state.error != null -> NavigationStatusCard(
+                icon = Icons.Rounded.AltRoute,
+                title = when (state.error) {
+                    NavigationError.RouteUnavailable -> "Route unavailable"
+                    NavigationError.PermissionDenied -> "Location permission required"
+                    else -> "Navigation unavailable"
+                },
+                body = when (state.error) {
+                    NavigationError.RouteUnavailable -> "Choose another destination or route"
+                    NavigationError.PermissionDenied -> "Allow location access to use navigation"
+                    else -> "Navigation could not start"
+                },
+                actionLabel = "Try again",
+                onAction = onSearchClick,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(16.dp),
+            )
+
+            state.active && state.progress.nextManeuver != null -> {
+                TurnCard(
+                    progress = state.progress,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(16.dp),
+                )
+                EtaCard(
+                    progress = state.progress,
+                    onStopNavigation = onStopNavigation,
+                    onSearchClick = onSearchClick,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(16.dp),
+                )
+            }
+
+            else -> NavigationStatusCard(
+                icon = Icons.Rounded.Navigation,
+                title = "Ready to drive",
+                body = "Choose a destination to start navigation",
                 actionLabel = "Search destination",
                 onAction = onSearchClick,
                 modifier = Modifier
@@ -241,9 +292,11 @@ private fun NavigationSurface(
 
 @Composable
 private fun TurnCard(
-    state: HomeNavigationState.Active,
+    progress: NavigationProgress,
     modifier: Modifier = Modifier,
 ) {
+    val maneuver = progress.nextManeuver ?: return
+    val secondary = progress.secondaryManeuver
     Column(
         modifier = modifier.width(386.dp),
     ) {
@@ -266,12 +319,12 @@ private fun TurnCard(
             )
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = state.distanceToTurn,
+                    text = formatDistance(maneuver.distanceMeters),
                     color = Color.White,
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(
-                    text = state.street,
+                    text = maneuver.roadName ?: maneuver.instruction,
                     color = Color.White,
                     style = MaterialTheme.typography.titleLarge,
                     maxLines = 2,
@@ -303,7 +356,7 @@ private fun TurnCard(
                 tint = CarColors.TextPrimary,
             )
             Text(
-                text = state.nextTurnLabel,
+                text = secondary?.instruction ?: "Continue",
                 color = CarColors.TextSecondary,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
@@ -315,7 +368,7 @@ private fun TurnCard(
 
 @Composable
 private fun EtaCard(
-    state: HomeNavigationState.Active,
+    progress: NavigationProgress,
     onStopNavigation: () -> Unit,
     onSearchClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -331,12 +384,15 @@ private fun EtaCard(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                text = state.duration,
+                text = formatDuration(progress.remainingDurationSeconds),
                 color = Color(0xFF5BBF6B),
                 style = MaterialTheme.typography.titleLarge,
             )
             Text(
-                text = "${state.distanceRemaining} · ${state.arrivalTime}",
+                text = listOfNotNull(
+                    formatDistance(progress.remainingDistanceMeters).takeIf(String::isNotBlank),
+                    formatEta(progress.etaEpochMillis),
+                ).joinToString(" · "),
                 color = CarColors.TextSecondary,
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -358,6 +414,38 @@ private fun EtaCard(
             }
         }
     }
+}
+
+private fun formatDistance(meters: Double?): String {
+    if (meters == null || meters < 0.0) return ""
+    val feet = meters * 3.28084
+    return if (feet < 1_000.0) {
+        "${feet.toInt()} ft"
+    } else {
+        String.format(Locale.US, "%.1f mi", meters / 1_609.344)
+    }
+}
+
+private fun formatDuration(seconds: Long?): String {
+    if (seconds == null || seconds < 0L) return ""
+    val minutes = (seconds + 30L) / 60L
+    return if (minutes < 60L) {
+        "$minutes min"
+    } else {
+        val hours = minutes / 60L
+        val remainder = minutes % 60L
+        if (remainder == 0L) "$hours hr" else "$hours hr $remainder min"
+    }
+}
+
+private val EtaFormatter = DateTimeFormatter.ofPattern("h:mm a")
+
+private fun formatEta(epochMillis: Long?): String? {
+    if (epochMillis == null || epochMillis <= 0L) return null
+    return Instant.ofEpochMilli(epochMillis)
+        .atZone(ZoneId.systemDefault())
+        .format(EtaFormatter)
+        .lowercase(Locale.getDefault())
 }
 
 @Composable
@@ -435,6 +523,7 @@ private fun NavigationStatusCard(
 private fun ContextColumn(
     media: MediaState,
     onMediaClick: () -> Unit,
+    onMediaSessionSelect: (String) -> Unit,
     onMediaPlayPause: () -> Unit,
     onMediaPrevious: () -> Unit,
     onMediaNext: () -> Unit,
@@ -449,6 +538,7 @@ private fun ContextColumn(
         MediaCard(
             state = media,
             onClick = onMediaClick,
+            onSessionSelect = onMediaSessionSelect,
             onPlayPause = onMediaPlayPause,
             onPrevious = onMediaPrevious,
             onNext = onMediaNext,
@@ -463,24 +553,67 @@ private fun ContextColumn(
 private fun MediaCard(
     state: MediaState,
     onClick: () -> Unit,
+    onSessionSelect: (String) -> Unit,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val sessions = state.availableSessions.ifEmpty {
+        listOfNotNull(state.selectedSession)
+    }
     Surface(
         onClick = onClick,
         modifier = modifier,
-        color = Color(0xFF0B5968),
+        color = CarColors.SurfaceContainer,
         shape = CarShapes.medium,
     ) {
-        if (state.hasSession) {
-            PlayingMediaContent(
-                state = state,
-                onPlayPause = onPlayPause,
-                onPrevious = onPrevious,
-                onNext = onNext,
-            )
+        if (state.hasSession && sessions.isNotEmpty()) {
+            val initialPage = sessions.indexOfFirst { it.id == state.selectedSessionId }
+                .coerceAtLeast(0)
+            val pagerState = rememberPagerState(initialPage = initialPage) { sessions.size }
+            val sessionIds = sessions.map(MediaSourceSession::id)
+            val currentSelectedSessionId = rememberUpdatedState(state.selectedSessionId)
+
+            LaunchedEffect(state.selectedSessionId, sessionIds) {
+                val selectedIndex = sessionIds.indexOf(state.selectedSessionId)
+                if (selectedIndex >= 0 && pagerState.currentPage != selectedIndex) {
+                    pagerState.scrollToPage(selectedIndex)
+                }
+            }
+
+            LaunchedEffect(pagerState, sessionIds) {
+                androidx.compose.runtime.snapshotFlow { pagerState.settledPage }
+                    .collect { page ->
+                        val id = sessionIds.getOrNull(page) ?: return@collect
+                        if (id != currentSelectedSessionId.value) {
+                            onSessionSelect(id)
+                        }
+                    }
+            }
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    beyondViewportPageCount = 1,
+                ) { page ->
+                    PlayingMediaContent(
+                        session = sessions[page],
+                        onPlayPause = onPlayPause,
+                        onPrevious = onPrevious,
+                        onNext = onNext,
+                    )
+                }
+
+                MediaSourceDots(
+                    count = sessions.size,
+                    selectedIndex = pagerState.currentPage,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp),
+                )
+            }
         } else {
             IdleMediaContent()
         }
@@ -526,100 +659,107 @@ private fun IdleMediaContent() {
 
 @Composable
 private fun PlayingMediaContent(
-    state: MediaState,
+    session: MediaSourceSession,
     onPlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.Bottom,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = state.title.ifBlank { "Unknown track" },
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    text = state.artist.ifBlank { state.source?.label.orEmpty() },
-                    color = Color.White.copy(alpha = 0.78f),
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            state.source?.icon?.let { icon ->
-                Image(
-                    bitmap = icon.asImageBitmap(),
-                    contentDescription = state.source.label,
-                    modifier = Modifier
-                        .padding(start = 12.dp)
-                        .size(32.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                )
-            }
+    Box(modifier = Modifier.fillMaxSize()) {
+        session.artwork?.let { artwork ->
+            Image(
+                bitmap = artwork.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
         }
-        Spacer(modifier = Modifier.height(18.dp))
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(4.dp)
-                .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
-        ) {
-            Box(
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.10f),
+                        0.46f to Color.Black.copy(alpha = 0.32f),
+                        1f to Color.Black.copy(alpha = 0.92f),
+                    ),
+                ),
+        )
+
+        session.source?.icon?.let { icon ->
+            Image(
+                bitmap = icon.asImageBitmap(),
+                contentDescription = session.source.label,
                 modifier = Modifier
-                    .fillMaxWidth(state.progress.coerceIn(0f, 1f))
-                    .height(4.dp)
-                    .background(Color.White, RoundedCornerShape(10.dp)),
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+                    .size(34.dp),
+                contentScale = ContentScale.Fit,
             )
         }
-        Row(
+
+        Column(
             modifier = Modifier
+                .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(top = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Bottom,
         ) {
-            MediaControl(
-                icon = Icons.Rounded.SkipPrevious,
-                contentDescription = "Previous",
-                onClick = onPrevious,
-                enabled = state.controls.canSkipPrevious,
+            Text(
+                text = session.title.ifBlank { "Unknown track" },
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Surface(
-                onClick = onPlayPause,
-                enabled = state.controls.canPlayPause,
-                modifier = Modifier.size(64.dp),
-                shape = CircleShape,
-                color = Color(0xFFAEEBFF),
+            Text(
+                text = session.artist.ifBlank { session.source?.label.orEmpty() },
+                color = Color.White.copy(alpha = 0.80f),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            WavyProgressBar(
+                progress = session.progress,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (state.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (state.isPlaying) "Pause" else "Play",
-                        modifier = Modifier.size(34.dp),
-                        tint = Color(0xFF191C18),
-                    )
+                MediaControl(
+                    icon = Icons.Rounded.SkipPrevious,
+                    contentDescription = "Previous",
+                    onClick = onPrevious,
+                    enabled = session.controls.canSkipPrevious,
+                )
+                Surface(
+                    onClick = onPlayPause,
+                    enabled = session.controls.canPlayPause,
+                    modifier = Modifier.size(58.dp),
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.92f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (session.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (session.isPlaying) "Pause" else "Play",
+                            modifier = Modifier.size(32.dp),
+                            tint = Color(0xFF171717),
+                        )
+                    }
                 }
+                MediaControl(
+                    icon = Icons.Rounded.SkipNext,
+                    contentDescription = "Next",
+                    onClick = onNext,
+                    enabled = session.controls.canSkipNext,
+                )
             }
-            MediaControl(
-                icon = Icons.Rounded.SkipNext,
-                contentDescription = "Next",
-                onClick = onNext,
-                enabled = state.controls.canSkipNext,
-            )
         }
     }
 }

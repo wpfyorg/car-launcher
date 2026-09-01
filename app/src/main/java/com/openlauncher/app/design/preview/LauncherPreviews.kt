@@ -3,11 +3,14 @@ package com.openlauncher.app.design.preview
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
 import com.openlauncher.app.design.theme.CarTheme
-import com.openlauncher.app.feature.home.HomeNavigationState
 import com.openlauncher.app.feature.home.HomeScreen
 import com.openlauncher.app.feature.home.HomeUiState
 import com.openlauncher.app.feature.media.MediaControls
 import com.openlauncher.app.feature.media.MediaState
+import com.openlauncher.app.feature.navigation.Maneuver
+import com.openlauncher.app.feature.navigation.ManeuverType
+import com.openlauncher.app.feature.navigation.NavigationProgress
+import com.openlauncher.app.feature.navigation.NavigationState
 import com.openlauncher.app.shell.LauncherShell
 
 @Preview(name = "YT5760D 1600×720", widthDp = 1600, heightDp = 720)
@@ -49,13 +52,23 @@ private fun HomeActiveNavigationPreview() {
         LauncherShell { _, _ ->
             HomeScreen(
                 state = HomeUiState(
-                    navigation = HomeNavigationState.Active(
-                        distanceToTurn = "350 ft",
-                        street = "101 W Pacific Coast Hwy",
-                        nextTurnLabel = "Turn right",
-                        duration = "50 min",
-                        distanceRemaining = "32.5 mi",
-                        arrivalTime = "12:26 pm",
+                    navigation = NavigationState(
+                        active = true,
+                        progress = NavigationProgress(
+                            nextManeuver = Maneuver(
+                                type = ManeuverType.TurnRight,
+                                instruction = "Turn right",
+                                roadName = "101 W Pacific Coast Hwy",
+                                distanceMeters = 106.68,
+                            ),
+                            secondaryManeuver = Maneuver(
+                                type = ManeuverType.TurnRight,
+                                instruction = "Turn right",
+                            ),
+                            remainingDistanceMeters = 52_303.7,
+                            remainingDurationSeconds = 3_000L,
+                            etaEpochMillis = 1_788_226_760_000L,
+                        ),
                     ),
                     media = MediaState(
                         hasSession = true,

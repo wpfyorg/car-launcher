@@ -17,6 +17,16 @@ android {
         versionName    = "1.1"
     }
 
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("freeGithub") {
+            dimension = "distribution"
+        }
+        create("playPaid") {
+            dimension = "distribution"
+        }
+    }
+
     buildTypes {
         debug {
             // Default signing config for normal device testing (restores app visibility)

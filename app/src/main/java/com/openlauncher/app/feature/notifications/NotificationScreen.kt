@@ -281,7 +281,7 @@ private fun NotificationAccessRequired(onRequestAccess: () -> Unit) {
                 style = MaterialTheme.typography.headlineMedium,
             )
             Text(
-                text = "Enable Open Launcher under Notification access to show a driving-safe notification list.",
+                text = "Enable Car Launcher under Notification access to show a driving-safe notification list.",
                 color = CarColors.TextSecondary,
                 style = MaterialTheme.typography.bodyLarge,
             )

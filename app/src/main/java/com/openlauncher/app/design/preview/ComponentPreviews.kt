@@ -28,6 +28,9 @@ import com.openlauncher.app.design.component.CarHeader
 import com.openlauncher.app.design.component.CarIconButton
 import com.openlauncher.app.design.component.CarListRow
 import com.openlauncher.app.design.component.CarRailButton
+import com.openlauncher.app.design.component.CarSearchEmptyState
+import com.openlauncher.app.design.component.CarSearchField
+import com.openlauncher.app.design.component.CarSearchResultsList
 import com.openlauncher.app.design.component.CarSwitch
 import com.openlauncher.app.design.theme.CarColors
 import com.openlauncher.app.design.theme.CarTheme
@@ -106,5 +109,50 @@ private fun PreviewGridItem(
                 tint = CarColors.Background,
             )
         }
+    }
+}
+
+@Preview(name = "Search pattern 800×480", widthDp = 800, heightDp = 480)
+@Composable
+private fun SearchPatternPreview() {
+    CarTheme {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(CarColors.Background)
+                .padding(16.dp),
+        ) {
+            CarSearchField(
+                query = "maps",
+                onQueryChange = {},
+                placeholder = "Search apps",
+            )
+            CarSearchResultsList(modifier = Modifier.weight(1f)) {
+                item {
+                    CarListRow(
+                        title = "Maps",
+                        subtitle = "com.google.android.apps.maps",
+                    )
+                }
+                item {
+                    CarListRow(
+                        title = "Organic Maps",
+                        subtitle = "app.organicmaps",
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Preview(name = "Search empty 800×480", widthDp = 800, heightDp = 480)
+@Composable
+private fun SearchEmptyPreview() {
+    CarTheme {
+        CarSearchEmptyState(
+            title = "No matching apps",
+            message = "Try a different app name or package.",
+            modifier = Modifier.background(CarColors.Background),
+        )
     }
 }

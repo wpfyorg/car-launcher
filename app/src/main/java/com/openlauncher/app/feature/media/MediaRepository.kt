@@ -7,6 +7,7 @@ import android.graphics.BitmapFactory
 import android.media.MediaMetadata
 import android.media.Rating
 import android.media.session.MediaController
+import android.media.session.MediaSession
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.net.Uri
@@ -37,6 +38,7 @@ interface MediaRepository {
     fun start()
     fun stop()
     fun refresh()
+    fun selectSession(id: String)
 }
 
 class AndroidMediaRepository(context: Context) : MediaRepository {
@@ -54,20 +56,24 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
     private val _state = MutableStateFlow(MediaState())
     override val state: StateFlow<MediaState> = _state.asStateFlow()
 
-    private var activeController: MediaController? = null
+    private val trackedControllers = linkedMapOf<MediaSession.Token, MediaController>()
+    private val sessionIds = mutableMapOf<MediaSession.Token, String>()
+    private var nextSessionId = 1L
+    private var selectedController: MediaController? = null
+    private var userSelectedSessionId: String? = null
     private var sessionsListenerRegistered = false
     private var started = false
     private var tickerJob: Job? = null
 
-    override val sessionController = MediaSessionController { activeController }
+    override val sessionController = MediaSessionController { selectedController }
 
     private val controllerCallback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) {
-            refreshFromActiveController()
+            refreshFromTrackedControllers()
         }
 
         override fun onMetadataChanged(metadata: MediaMetadata?) {
-            refreshFromActiveController()
+            refreshFromTrackedControllers()
         }
 
         override fun onSessionDestroyed() {
@@ -77,7 +83,7 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
 
     private val activeSessionsChangedListener =
         MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
-            attachBestController(controllers.orEmpty())
+            attachControllers(controllers.orEmpty())
         }
 
     private val notificationRefreshListener: () -> Unit = {
@@ -104,11 +110,29 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         tickerJob = null
         NotificationListenerBridge.removeListener(notificationRefreshListener)
         unregisterSessionsListener()
-        attachController(null)
+        clearControllers()
     }
 
     override fun refresh() {
         mainHandler.post(::refreshAccessAndSessions)
+    }
+
+    override fun selectSession(id: String) {
+        val select = {
+            val controller = trackedControllers.values.firstOrNull { controller ->
+                sessionIdFor(controller) == id
+            }
+            if (controller != null) {
+                userSelectedSessionId = id
+                selectedController = controller
+                refreshFromTrackedControllers()
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            select()
+        } else {
+            mainHandler.post(select)
+        }
     }
 
     private fun refreshAccessAndPosition() {
@@ -118,7 +142,7 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
                 _state.value.hasSession
             ) {
                 unregisterSessionsListener()
-                attachController(null)
+                clearControllers()
                 _state.value = MediaState(accessStatus = MediaAccessStatus.PermissionRequired)
             }
             return
@@ -129,17 +153,17 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
             return
         }
 
-        if (activeController == null) {
+        if (selectedController == null) {
             refreshSessions()
         } else {
-            refreshFromActiveController()
+            refreshFromTrackedControllers()
         }
     }
 
     private fun refreshAccessAndSessions() {
         if (!hasMediaAccess()) {
             unregisterSessionsListener()
-            attachController(null)
+            clearControllers()
             _state.value = MediaState(accessStatus = MediaAccessStatus.PermissionRequired)
             return
         }
@@ -182,13 +206,25 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         }.getOrElse {
             emptyList()
         }
-        attachBestController(controllers)
+        attachControllers(controllers)
     }
 
-    private fun attachBestController(controllers: List<MediaController>) {
-        val bestController = controllers.minByOrNull { controllerPriority(it) }
-        attachController(bestController)
-        refreshFromActiveController()
+    private fun attachControllers(controllers: List<MediaController>) {
+        val incomingByToken = controllers.associateBy(MediaController::getSessionToken)
+        val removedTokens = trackedControllers.keys - incomingByToken.keys
+        removedTokens.forEach { token ->
+            trackedControllers.remove(token)?.unregisterCallback(controllerCallback)
+            sessionIds.remove(token)
+        }
+
+        controllers.forEach { controller ->
+            val token = controller.sessionToken
+            if (trackedControllers.containsKey(token)) return@forEach
+            trackedControllers[token] = controller
+            controller.registerCallback(controllerCallback, mainHandler)
+        }
+
+        refreshFromTrackedControllers()
     }
 
     private fun controllerPriority(controller: MediaController): Int {
@@ -202,19 +238,69 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         }
     }
 
-    private fun attachController(controller: MediaController?) {
-        if (controller?.sessionToken == activeController?.sessionToken) return
-        activeController?.unregisterCallback(controllerCallback)
-        activeController = controller
-        controller?.registerCallback(controllerCallback, mainHandler)
+    private fun clearControllers() {
+        trackedControllers.values.forEach { controller ->
+            controller.unregisterCallback(controllerCallback)
+        }
+        trackedControllers.clear()
+        sessionIds.clear()
+        selectedController = null
+        userSelectedSessionId = null
     }
 
-    private fun refreshFromActiveController() {
-        val controller = activeController
-        if (controller == null) {
+    private fun refreshFromTrackedControllers() {
+        val controllers = trackedControllers.values.toList()
+        if (controllers.isEmpty()) {
+            selectedController = null
+            userSelectedSessionId = null
             _state.value = MediaState(accessStatus = MediaAccessStatus.Available)
             return
         }
+
+        val sessions = controllers.map(::sessionFor)
+        val sessionsById = sessions.associateBy(MediaSourceSession::id)
+        val explicitSessionId = userSelectedSessionId?.takeIf(sessionsById::containsKey)
+        if (userSelectedSessionId != null && explicitSessionId == null) {
+            userSelectedSessionId = null
+        }
+
+        val selectedSessionId = explicitSessionId ?: controllers
+            .minByOrNull(::controllerPriority)
+            ?.let(::sessionIdFor)
+        val selectedSession = selectedSessionId?.let(sessionsById::get)
+        selectedController = selectedSessionId?.let { id ->
+            controllers.firstOrNull { controller -> sessionIdFor(controller) == id }
+        }
+
+        if (selectedSession == null) {
+            selectedController = null
+            _state.value = MediaState(
+                accessStatus = MediaAccessStatus.Available,
+                availableSessions = sessions,
+            )
+            return
+        }
+
+        _state.value = MediaState(
+            accessStatus = MediaAccessStatus.Available,
+            hasSession = true,
+            title = selectedSession.title,
+            artist = selectedSession.artist,
+            artwork = selectedSession.artwork,
+            source = selectedSession.source,
+            durationMs = selectedSession.durationMs,
+            positionMs = selectedSession.positionMs,
+            isPlaying = selectedSession.isPlaying,
+            isRepeatEnabled = selectedSession.isRepeatEnabled,
+            isShuffleEnabled = selectedSession.isShuffleEnabled,
+            isFavorite = selectedSession.isFavorite,
+            controls = selectedSession.controls,
+            availableSessions = sessions,
+            selectedSessionId = selectedSession.id,
+        )
+    }
+
+    private fun sessionFor(controller: MediaController): MediaSourceSession {
 
         val metadata = controller.metadata
         val playbackState = controller.playbackState
@@ -241,9 +327,8 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         val repeatAction = playbackState.customActionMatching("repeat")
         val shuffleAction = playbackState.customActionMatching("shuffle")
 
-        _state.value = MediaState(
-            accessStatus = MediaAccessStatus.Available,
-            hasSession = true,
+        return MediaSourceSession(
+            id = sessionIdFor(controller),
             title = title,
             artist = artist,
             artwork = metadata.artwork(),
@@ -266,6 +351,13 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
                 canFavorite = supportsHeartRating || playbackState.favoriteCustomAction() != null,
             ),
         )
+    }
+
+    private fun sessionIdFor(controller: MediaController): String {
+        val token = controller.sessionToken
+        return sessionIds.getOrPut(token) {
+            "${controller.packageName}:${nextSessionId++}"
+        }
     }
 
     private fun sourceFor(packageName: String): MediaSource? {
