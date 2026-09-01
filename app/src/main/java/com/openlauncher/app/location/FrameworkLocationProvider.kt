@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Bundle
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.channels.awaitClose
@@ -48,8 +49,17 @@ class FrameworkLocationProvider(context: Context) : LocationProvider {
             return@callbackFlow
         }
 
-        val listener = LocationListener { location ->
-            trySend(location.toSample())
+        val listener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                trySend(location.toSample())
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+
+            override fun onProviderEnabled(provider: String) = Unit
+
+            override fun onProviderDisabled(provider: String) = Unit
         }
 
         try {
@@ -74,7 +84,10 @@ class FrameworkLocationProvider(context: Context) : LocationProvider {
 
     private fun frameworkProviders(allowNetworkFallback: Boolean): List<String> {
         return buildList {
-            if (locationManager.isProviderEnabledSafely(LocationManager.GPS_PROVIDER)) {
+            if (
+                hasFineLocationPermission() &&
+                locationManager.isProviderEnabledSafely(LocationManager.GPS_PROVIDER)
+            ) {
                 add(LocationManager.GPS_PROVIDER)
             }
             if (
@@ -87,12 +100,16 @@ class FrameworkLocationProvider(context: Context) : LocationProvider {
     }
 
     private fun hasLocationPermission(): Boolean {
+        return hasFineLocationPermission() || ContextCompat.checkSelfPermission(
+            appContext,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasFineLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(
             appContext,
             Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
-            appContext,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
         ) == PackageManager.PERMISSION_GRANTED
     }
 }
