@@ -57,6 +57,7 @@ Thumbs.db
 app/src/debug/
 /.agents/
 /.claude/
+/.commandcode/
 /skills-lock.json
 
 # Design source files and local visual research
@@ -66,5 +67,5 @@ app/src/debug/
 /assets/
 /Screenshots/
 /Screenshots /
-/image-import-*
+/image-import*
 /SFX/
