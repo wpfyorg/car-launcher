@@ -915,6 +915,14 @@ of dependent PR branches.
 
 # 17. Phase 11 — Free Build: External App Embedding POC
 
+**Status: In progress (2026-09-02).** The Android 9 `ActivityView` path is now
+proven in a separate privileged AOSP API-28 lab VM: OpenLauncher can create the
+virtual display, render an owned activity, render a separately installed
+third-party probe package, forward touch, and keep tasks isolated on the
+embedded display. Focused-stack Back routing has also been proven at the
+Android framework level. The YT5760D is still required for the final privilege
+matrix and real-hardware exit gate.
+
 Do this as a dedicated technical experiment before wiring it into the dashboard.
 
 The reference LecoAuto implementation strongly indicates this architecture:
@@ -945,13 +953,13 @@ setFocusedStack
 
 First embed an OpenLauncher-owned test activity into a `VirtualDisplay`.
 
-Current POC status (2026-09-01): the debug source set contains a standalone
-`VirtualDisplayPocActivity` plus an OpenLauncher-owned `EmbeddedProbeActivity`.
-The API 28 emulator can create the `VirtualDisplay`, but reports
-`android.software.activities_on_secondary_displays=false`; Android therefore
-does not provide a valid secondary-activity test environment there. The POC
-now detects this capability and blocks launch rather than allowing the probe
-to fall back onto display 0. Step 11.1 still requires the YT5760D hardware.
+Current POC status (2026-09-02): the original baseline emulator is still not a
+valid secondary-activity environment, but a separate AOSP API-28 lab VM now is.
+On that VM, the platform-compatible OpenLauncher build has the required
+signature permissions and `ActivityView` creates a real virtual display. The
+OpenLauncher-owned `EmbeddedProbeActivity` renders on that display as a
+separate task instead of moving the host task away from display 0. Physical
+touches inside the embedded surface reach the probe activity.
 
 Mini AA investigation (2026-09-01): its System build uses hidden AOSP
 `ActivityView` / `TaskView` wrappers rather than standard Android PiP. The
@@ -962,43 +970,68 @@ fallback. For Android 9, `ActivityView` is the most relevant compatibility
 path because it owns the virtual display and input forwarding internally.
 OpenLauncher now has a clean-room debug `ActivityViewPocActivity` that checks
 the hidden class, secondary-display feature, `INJECT_EVENTS`, and
-`INTERNAL_SYSTEM_WINDOW` before attaching. The normal emulator cannot grant
-those signature permissions, so this is a system-build/hardware-only path;
-the normal/Play build must not depend on it.
+`INTERNAL_SYSTEM_WINDOW` before attaching. The privileged AOSP VM additionally
+proved `MANAGE_ACTIVITY_STACKS` is the Android 9 permission needed for the
+focused-stack compatibility path. A normally signed app cannot obtain these
+signature permissions, so the normal/Play build must not depend on this path.
 
-The POC compatibility logic is now separated into `EmbeddingCapabilities`
-and `ActivityViewCompat` in the debug source set. This keeps hidden API
-reflection and signature-permission checks out of `main` while giving the
-future YT5760D Free system source set a small unit that can be moved intact
-after hardware proves the required signing/privilege combination.
+The POC compatibility logic is now separated into `EmbeddingCapabilities`,
+`ActivityViewCompat`, and a small Android-9-only `ActivityManagerCompat` bridge
+inside `freeGithubDebug`. `ActivityViewCompat` falls back to the private
+`mVirtualDisplay` field on API 28, where `getVirtualDisplayId()` does not exist.
+For Back, it finds and focuses the stack belonging to the ActivityView display,
+forwards Android-system-style Back key events through ActivityView's
+`IInputForwarder`, then restores host focus. This keeps hidden API reflection
+and signature-permission checks out of normal production source sets.
 
-Verify:
+VM verification so far:
 
-- render
-- lifecycle
-- resize
-- teardown
-- relaunch
+- render: passed for the owned probe and a separately installed external probe;
+- lifecycle: host background/foreground passed with the virtual display alive;
+- teardown/recreate: passed;
+- relaunch: repeated owned-probe launch/back passed when task teardown completes;
+- resize: passed an explicit compact/full stress run on the owned probe; repeated
+  resize requests kept the ActivityView display alive and the probe task present;
+- updated `ActivityViewCompat.performBackPress()`: passed end-to-end from the
+  actual rebuilt/platform-signed POC UI. The embedded probe task closed, the host
+  remained resumed on display 0, and the ActivityView display remained valid;
+- platform-signed reinstall is now reproducible in ignored lab tooling by fetching
+  the public AOSP platform test signer into a temporary directory, verifying its
+  expected certificate fingerprint, signing only a temporary APK copy, installing
+  it, and cleaning the signer files on exit.
 
 ## Step 11.2 — external app
 
 Launch a real installed app onto the virtual display.
 
+VM status (2026-09-02): a disposable, separately installed package was used to
+prove the actual third-party package boundary. It rendered on the ActivityView
+display, received touch, and received Back while the OpenLauncher host remained
+on display 0. The disposable harness lives only in ignored private research
+tooling and is not publishable application source.
+
 Test:
 
-- Google Maps
-- Organic Maps or another lightweight navigation app
+- Organic Maps — partially passed in the VM using the current official Web APK
+  (`app.organicmaps.web`). Its first embedded first-run launch hit an Android 9
+  `BadTokenException`; after completing the location-permission/startup step on
+  display 0, it re-embedded and rendered its legacy world-map download screen on
+  the ActivityView display without crashing. The mandatory world-overview map did
+  not complete in this lab session, so the actual map-surface drag/long-press/pinch
+  matrix remains pending;
+- Google Maps — test if practical in the lab image;
+- repeat the same real-navigation tests on YT5760D before the exit gate.
 
 ## Step 11.3 — touch
 
 Prove:
 
-- tap
-- drag
-- pinch if possible
-- long press
-- back
-- focus
+- tap — passed in owned and external probe activities;
+- drag — pending;
+- pinch if possible — pending;
+- long press — pending;
+- back — passed through the actual rebuilt POC Back button;
+- focus — passed in the VM using the Android 9 focused-stack path.
 
 ## Step 11.4 — privilege matrix
 
@@ -1014,6 +1047,31 @@ Record exact results on YT5760D:
 | back | TBD | TBD | TBD |
 | resize | TBD | TBD | TBD |
 
+API-28 AOSP lab evidence before hardware testing:
+
+| Capability | Platform-compatible lab build |
+| --- | --- |
+| create ActivityView display | Passed |
+| launch owned activity on display | Passed |
+| launch separate external package on display | Passed |
+| keep host on display 0 | Passed |
+| keep embedded task on virtual display | Passed |
+| focus embedded stack | Passed |
+| tap forwarding | Passed |
+| Back routing mechanism | Passed through rebuilt POC UI |
+| release/recreate | Passed |
+| background/foreground | Passed |
+| resize stress | Passed with repeated compact/full transitions |
+
+The VM currently grants `INJECT_EVENTS`, `INTERNAL_SYSTEM_WINDOW`,
+`MANAGE_ACTIVITY_STACKS`, and `START_TASKS_FROM_RECENTS` to the
+platform-compatible launcher build. The successful rebuilt-app Back, resize,
+release/recreate, background/foreground, and external-app runs still used this
+same grant set, so this session does not claim a smaller per-operation minimum.
+The launcher remains a normal application UID in the lab; `android.uid.system`
+is therefore not required for the operations proven so far and should not be
+added unless the hardware matrix requires it.
+
 Do not request privileged permissions just because the reference APK declares them. Add only what testing proves is necessary.
 
 ## Exit gate
@@ -1023,6 +1081,16 @@ A real navigation app is visible and touch-interactive inside a standalone OpenL
 ---
 
 # 18. Phase 12 — Product Flavors
+
+**Status: Software boundary implemented (2026-09-02).** The `distribution`
+dimension now provides `freeGithub` and `playPaid`. Hidden/privileged embedding
+POCs live only in `freeGithubDebug`; the Paid debug and release manifests were
+verified without the privileged task/input permissions. Free exposes external
+navigation settings while Paid exposes the native/offline navigation surface.
+Both flavors build in Debug and Release. The VM now gives us a concrete
+ActivityView compatibility implementation to promote later, but a separate
+YT5760D Free flavor should be created only if the Phase 11 hardware privilege
+matrix proves it is necessary.
 
 Only after the embedding POC tells us what Free needs, create final distribution boundaries.
 
@@ -1058,6 +1126,19 @@ Rules:
 ---
 
 # 19. Phase 13 — Integrate Free Navigation Into Home
+
+**Status: In progress (2026-09-02).** The selected external navigation app is
+wired into the Home navigation surface through `EmbeddedNavigationHost`,
+`EmbeddedTaskView`, and `VirtualDisplayController`, with relaunch-loop guards
+and surface recreation handling. The normal Free build still uses public SDK
+APIs and remains preview-only for touch/task control. Phase 11 has now proven
+the Android 9 ActivityView approach in the privileged VM; the next integration
+step is to promote that proven compatibility layer into the final Free-only
+privileged source boundary after the privilege matrix is settled.
+Distribution-specific Settings keep Free external navigation controls out of
+Paid and Free offline-map controls out of the Free build. Expand/collapse,
+explicit close/restart controls, process-death recovery, real navigation-app
+interaction, and YT5760D validation remain before the Phase 13 exit gate.
 
 Once the embedding POC passes:
 

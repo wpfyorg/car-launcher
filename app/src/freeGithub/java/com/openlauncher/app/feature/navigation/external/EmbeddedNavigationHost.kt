@@ -41,14 +41,14 @@ fun EmbeddedNavigationHost(
         val message = when (val state = hostState) {
             EmbeddingHostState.Idle,
             EmbeddingHostState.SurfaceReady,
-            is EmbeddingHostState.Running,
-            -> if (
-                compatibilityMode &&
-                (!InputForwarder.isSupported || !TaskManagerCompat.canControlEmbeddedTask)
-            ) {
-                "Compatibility input awaits YT5760D privilege verification"
-            } else {
-                null
+            -> null
+
+            is EmbeddingHostState.Running -> when {
+                !InputForwarder.isSupported || !TaskManagerCompat.canControlEmbeddedTask ->
+                    "Navigation preview only · touch awaits YT5760D privilege verification"
+
+                compatibilityMode -> "Compatibility mode active"
+                else -> null
             }
 
             is EmbeddingHostState.Unavailable -> state.reason

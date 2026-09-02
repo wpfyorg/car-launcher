@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.openlauncher.app.data.settings.StartupScreen
 import com.openlauncher.app.design.theme.CarColors
 import com.openlauncher.app.design.theme.CarTheme
+import com.openlauncher.app.distribution.DistributionFeatures
 import com.openlauncher.app.feature.home.HomeRoute
 import com.openlauncher.app.feature.media.AndroidMediaRepository
 import com.openlauncher.app.feature.media.MediaRoute
@@ -78,7 +79,9 @@ fun CarLauncherApp() {
             ) { destination, navigateTo ->
                 when (destination) {
                     ShellDestination.Home -> {
-                        val navigationAppKey = settingsState.settings.navigationAppKey
+                        val navigationAppKey = settingsState.settings.navigationAppKey.takeIf {
+                            DistributionFeatures.supportsExternalNavigation
+                        }
                         val navigationApp = settingsState.apps.firstOrNull {
                             it.stableKey == navigationAppKey
                         }
@@ -93,7 +96,9 @@ fun CarLauncherApp() {
                             navigationContent = {
                                 DistributionNavigationHomeContent(
                                     app = navigationApp,
-                                    compatibilityMode = settingsState.settings.navigationCompatibilityMode,
+                                    compatibilityMode =
+                                        DistributionFeatures.supportsNavigationCompatibilityMode &&
+                                            settingsState.settings.navigationCompatibilityMode,
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             },

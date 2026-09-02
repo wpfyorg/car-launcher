@@ -47,6 +47,7 @@ import com.openlauncher.app.design.component.CarListRow
 import com.openlauncher.app.design.component.CarSwitch
 import com.openlauncher.app.design.theme.CarColors
 import com.openlauncher.app.design.theme.CarSpacing
+import com.openlauncher.app.distribution.DistributionFeatures
 import com.openlauncher.app.feature.navigation.offline.OfflineMapRegion
 import com.openlauncher.app.feature.navigation.offline.OfflineMapRegionState
 import com.openlauncher.app.launcher.LauncherApp
@@ -262,37 +263,43 @@ private fun SettingsList(
             )
 
             section("Navigation")
-            settingRow(
-                title = "External navigation app",
-                subtitle = navigationLabel,
-                onClick = onOpenNavigationApp,
-                showChevron = true,
-            )
-            settingRow(
-                title = "Offline maps",
-                subtitle = offlineMapsSummary(state.offlineMapRegions),
-                onClick = onOpenOfflineMaps,
-                showChevron = true,
-            )
-            settingRow(
-                title = "Embedded navigation",
-                subtitle = if (settings.navigationAppKey == null) {
-                    "Choose a navigation app first"
-                } else {
-                    "Head-unit compatibility check pending"
-                },
-            )
-            settingRow(
-                title = "Compatibility mode",
-                subtitle = "Fallback for head units that need legacy embedding behavior",
-                onClick = { onCompatibilityModeChange(!settings.navigationCompatibilityMode) },
-                trailing = {
-                    CarSwitch(
-                        checked = settings.navigationCompatibilityMode,
-                        onCheckedChange = onCompatibilityModeChange,
-                    )
-                },
-            )
+            if (DistributionFeatures.supportsExternalNavigation) {
+                settingRow(
+                    title = "External navigation app",
+                    subtitle = navigationLabel,
+                    onClick = onOpenNavigationApp,
+                    showChevron = true,
+                )
+                settingRow(
+                    title = "Embedded navigation",
+                    subtitle = if (settings.navigationAppKey == null) {
+                        "Choose a navigation app first"
+                    } else {
+                        "Head-unit compatibility check pending"
+                    },
+                )
+            }
+            if (DistributionFeatures.supportsOfflineMaps) {
+                settingRow(
+                    title = "Offline maps",
+                    subtitle = offlineMapsSummary(state.offlineMapRegions),
+                    onClick = onOpenOfflineMaps,
+                    showChevron = true,
+                )
+            }
+            if (DistributionFeatures.supportsNavigationCompatibilityMode) {
+                settingRow(
+                    title = "Compatibility mode",
+                    subtitle = "Fallback for head units that need legacy embedding behavior",
+                    onClick = { onCompatibilityModeChange(!settings.navigationCompatibilityMode) },
+                    trailing = {
+                        CarSwitch(
+                            checked = settings.navigationCompatibilityMode,
+                            onCheckedChange = onCompatibilityModeChange,
+                        )
+                    },
+                )
+            }
 
             section("System / diagnostics")
             settingRow(title = "Car Launcher", subtitle = "Version ${diagnostics.appVersion}")

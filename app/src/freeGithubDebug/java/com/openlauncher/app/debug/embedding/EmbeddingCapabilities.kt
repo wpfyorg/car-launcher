@@ -11,7 +11,7 @@ data class EmbeddingCapabilities(
     val taskViewClassName: String?,
     val injectEvents: Boolean,
     val internalSystemWindow: Boolean,
-    val manageActivityTasks: Boolean,
+    val manageActivityStacks: Boolean,
     val startTasksFromRecents: Boolean,
 ) {
     val strategy: EmbeddingStrategy
@@ -44,8 +44,8 @@ data class EmbeddingCapabilities(
         append(yesNo(injectEvents))
         append(" internalWindow=")
         append(yesNo(internalSystemWindow))
-        append(" manageTasks=")
-        append(yesNo(manageActivityTasks))
+        append(" manageStacks=")
+        append(yesNo(manageActivityStacks))
         append(" startRecents=")
         append(yesNo(startTasksFromRecents))
     }
@@ -62,7 +62,7 @@ data class EmbeddingCapabilities(
                 taskViewClassName = TaskViewClassNames.firstOrNull(::classExists),
                 injectEvents = context.hasPermission(InjectEventsPermission),
                 internalSystemWindow = context.hasPermission(InternalSystemWindowPermission),
-                manageActivityTasks = context.hasPermission(ManageActivityTasksPermission),
+                manageActivityStacks = context.hasPermission(ManageActivityStacksPermission),
                 startTasksFromRecents = context.hasPermission(StartTasksFromRecentsPermission),
             )
         }
@@ -78,7 +78,7 @@ data class EmbeddingCapabilities(
         private const val ActivityViewClassName = "android.app.ActivityView"
         private const val InjectEventsPermission = "android.permission.INJECT_EVENTS"
         private const val InternalSystemWindowPermission = "android.permission.INTERNAL_SYSTEM_WINDOW"
-        private const val ManageActivityTasksPermission = "android.permission.MANAGE_ACTIVITY_TASKS"
+        private const val ManageActivityStacksPermission = "android.permission.MANAGE_ACTIVITY_STACKS"
         private const val StartTasksFromRecentsPermission = "android.permission.START_TASKS_FROM_RECENTS"
 
         private val TaskViewClassNames = listOf(

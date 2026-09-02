@@ -16,7 +16,7 @@ import android.widget.TextView
 /**
  * Android 9 system-build experiment based on AOSP's hidden android.app.ActivityView API.
  *
- * This stays in the debug source set because ActivityView is not an SDK API and requires
+ * This stays in the Free+Debug source set because ActivityView is not an SDK API and requires
  * platform/signature privileges for input forwarding and arbitrary third-party embedding.
  */
 class ActivityViewPocActivity : Activity() {
@@ -26,6 +26,7 @@ class ActivityViewPocActivity : Activity() {
     private var activityView: ActivityViewCompat? = null
     private var pendingTarget: LaunchTarget? = null
     private var readyPollCount = 0
+    private var compactSize = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,8 +55,10 @@ class ActivityViewPocActivity : Activity() {
             setBackgroundColor(Color.rgb(32, 33, 35))
             setPadding(8, 8, 8, 8)
             addView(actionButton("Probe") { launch(LaunchTarget.Probe) })
+            addView(actionButton("Organic") { launch(LaunchTarget.OrganicMaps) })
             addView(actionButton("Maps") { launch(LaunchTarget.Maps) })
             addView(actionButton("Back") { performEmbeddedBack() })
+            addView(actionButton("Resize") { toggleActivityViewSize() })
             addView(actionButton("Release") { releaseActivityView() })
             addView(actionButton("Recreate") { recreateActivityView() })
         }
@@ -148,8 +151,8 @@ class ActivityViewPocActivity : Activity() {
             logStatus("launch blocked\n${capabilities.summary()}")
             return
         }
-        if (target == LaunchTarget.Maps && !capabilities.canHostExternalActivity) {
-            logStatus("Maps blocked: INTERNAL_SYSTEM_WINDOW not granted")
+        if (target != LaunchTarget.Probe && !capabilities.canHostExternalActivity) {
+            logStatus("${target.label} blocked: INTERNAL_SYSTEM_WINDOW not granted")
             return
         }
         if (activityView == null) createActivityView()
@@ -166,7 +169,7 @@ class ActivityViewPocActivity : Activity() {
             logStatus("No launcher intent for ${target.label}")
             return
         }
-        view.startActivity(intent, external = target == LaunchTarget.Maps).fold(
+        view.startActivity(intent, external = target != LaunchTarget.Probe).fold(
             onSuccess = { logStatus("started ${target.label} in ActivityView display=$displayId") },
             onFailure = { error ->
                 logStatus("start ${target.label} failed: ${error.javaClass.simpleName}: ${error.message}")
@@ -175,7 +178,12 @@ class ActivityViewPocActivity : Activity() {
     }
 
     private fun targetIntent(target: LaunchTarget): Intent? = when (target) {
-        LaunchTarget.Probe -> Intent(this, EmbeddedProbeActivity::class.java)
+        LaunchTarget.Probe -> Intent(this, EmbeddedProbeActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+        }
+        LaunchTarget.OrganicMaps -> OrganicMapsPackages.firstNotNullOfOrNull(
+            packageManager::getLaunchIntentForPackage,
+        )
         LaunchTarget.Maps -> packageManager.getLaunchIntentForPackage(GoogleMapsPackage)
     }
 
@@ -203,6 +211,28 @@ class ActivityViewPocActivity : Activity() {
         createActivityView()
     }
 
+    private fun toggleActivityViewSize() {
+        val view = activityView ?: return
+        val width = host.width
+        val height = host.height
+        if (width == 0 || height == 0) {
+            logStatus("resize blocked: host has not been measured")
+            return
+        }
+
+        compactSize = !compactSize
+        val params = FrameLayout.LayoutParams(
+            if (compactSize) (width * CompactScale).toInt() else ViewGroup.LayoutParams.MATCH_PARENT,
+            if (compactSize) (height * CompactScale).toInt() else ViewGroup.LayoutParams.MATCH_PARENT,
+        ).apply {
+            gravity = if (compactSize) Gravity.CENTER else Gravity.NO_GRAVITY
+        }
+        view.layoutParams = params
+        view.requestLayout()
+        val label = if (compactSize) "compact" else "full"
+        logStatus("ActivityView resize requested: $label display=${view.virtualDisplayId}")
+    }
+
     private fun actionButton(label: String, onClick: () -> Unit): View =
         Button(this).apply {
             text = label
@@ -216,12 +246,15 @@ class ActivityViewPocActivity : Activity() {
 
     private enum class LaunchTarget(val label: String) {
         Probe("probe"),
+        OrganicMaps("Organic Maps"),
         Maps("maps"),
     }
 
     companion object {
         private const val Tag = "OpenLauncherActivityView"
         private const val GoogleMapsPackage = "com.google.android.apps.maps"
+        private val OrganicMapsPackages = listOf("app.organicmaps", "app.organicmaps.web")
+        private const val CompactScale = 0.67f
         private const val ReadyPollMillis = 100L
         private const val MaxReadyPolls = 50
     }
