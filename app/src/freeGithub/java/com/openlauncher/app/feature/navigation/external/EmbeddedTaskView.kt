@@ -9,16 +9,21 @@ import com.openlauncher.app.launcher.LauncherApp
 internal class EmbeddedTaskView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : SurfaceView(context, attrs), SurfaceHolder.Callback {
+) : SurfaceView(context, attrs), SurfaceHolder.Callback, EmbeddedNavigationView {
     private val controller = VirtualDisplayController(context, ::handleState)
     private var targetApp: LauncherApp? = null
     private var stateListener: (EmbeddingHostState) -> Unit = {}
+    private var sessionHostRegistrationId: Long? = null
+    private var sessionHostAppKey: String? = null
+
+    override val supportsInteractiveEmbedding: Boolean
+        get() = InputForwarder.isSupported && TaskManagerCompat.canControlEmbeddedTask
 
     init {
         holder.addCallback(this)
     }
 
-    fun bind(
+    override fun bind(
         app: LauncherApp?,
         onStateChanged: (EmbeddingHostState) -> Unit,
     ) {
@@ -26,12 +31,39 @@ internal class EmbeddedTaskView @JvmOverloads constructor(
         val changed = targetApp?.stableKey != app?.stableKey
         targetApp = app
         if (changed && app != null) {
-            controller.launch(app, force = true)
+            registerSessionHost(app)
+            if (controller.displayId == null && holder.surface.isValid) {
+                attachSurface(holder)
+            } else {
+                controller.launch(app, force = true)
+            }
+        } else if (app != null) {
+            registerSessionHost(app)
         }
     }
 
-    fun ensureRunning() {
+    override fun ensureRunning() {
         targetApp?.let(controller::launch)
+    }
+
+    override fun release() {
+        // Keep the process session registered across Compose/View disposal. The public fallback
+        // cannot control task ids, but retaining the host lets an explicit provider switch release
+        // its display before the next provider starts.
+        controller.release()
+    }
+
+    private fun registerSessionHost(app: LauncherApp) {
+        if (sessionHostRegistrationId != null && sessionHostAppKey == app.stableKey) return
+        sessionHostRegistrationId?.let { registrationId ->
+            NavigationEmbeddingSession.unregisterHost(registrationId)
+        }
+        sessionHostRegistrationId = NavigationEmbeddingSession.registerHost(app.stableKey) {
+            sessionHostRegistrationId = null
+            sessionHostAppKey = null
+            controller.release()
+        }
+        sessionHostAppKey = app.stableKey
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
@@ -48,11 +80,11 @@ internal class EmbeddedTaskView @JvmOverloads constructor(
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        controller.release()
+        release()
     }
 
     override fun onDetachedFromWindow() {
-        controller.release()
+        release()
         super.onDetachedFromWindow()
     }
 

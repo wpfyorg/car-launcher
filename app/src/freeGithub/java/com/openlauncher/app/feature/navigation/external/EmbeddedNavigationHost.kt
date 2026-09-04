@@ -1,5 +1,8 @@
 package com.openlauncher.app.feature.navigation.external
 
+import android.content.Context
+import android.view.View
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,13 +30,32 @@ fun EmbeddedNavigationHost(
     var hostState by remember(app.stableKey) {
         mutableStateOf<EmbeddingHostState>(EmbeddingHostState.Idle)
     }
+    var supportsInteractiveEmbedding by remember(app.stableKey) {
+        mutableStateOf(false)
+    }
+    var embeddedView by remember(app.stableKey) {
+        mutableStateOf<EmbeddedNavigationView?>(null)
+    }
+
+    BackHandler(
+        enabled = embeddedView?.supportsEmbeddedBack == true && hostState is EmbeddingHostState.Running,
+    ) {
+        embeddedView?.performBackPress()
+    }
 
     Box(modifier = modifier.background(Color.Black)) {
         AndroidView(
-            factory = { context -> EmbeddedTaskView(context) },
+            factory = ::createEmbeddedNavigationView,
+            onRelease = { view ->
+                (view as? EmbeddedNavigationView)?.release()
+            },
             update = { view ->
-                view.bind(app, onStateChanged = { hostState = it })
-                view.ensureRunning()
+                (view as? EmbeddedNavigationView)?.let { embedded ->
+                    embeddedView = embedded
+                    supportsInteractiveEmbedding = embedded.supportsInteractiveEmbedding
+                    embedded.bind(app, onStateChanged = { hostState = it })
+                    embedded.ensureRunning()
+                }
             },
             modifier = Modifier.fillMaxSize(),
         )
@@ -44,7 +66,7 @@ fun EmbeddedNavigationHost(
             -> null
 
             is EmbeddingHostState.Running -> when {
-                !InputForwarder.isSupported || !TaskManagerCompat.canControlEmbeddedTask ->
+                !supportsInteractiveEmbedding ->
                     "Navigation preview only · touch awaits YT5760D privilege verification"
 
                 compatibilityMode -> "Compatibility mode active"
@@ -67,3 +89,18 @@ fun EmbeddedNavigationHost(
         }
     }
 }
+
+private fun createEmbeddedNavigationView(context: Context): View {
+    val privilegedDebugView = runCatching {
+        Class.forName(PrivilegedDebugViewClassName)
+            .getConstructor(Context::class.java)
+            .newInstance(context) as? View
+    }.getOrNull()
+
+    return privilegedDebugView
+        ?.takeIf { it is EmbeddedNavigationView }
+        ?: EmbeddedTaskView(context)
+}
+
+private const val PrivilegedDebugViewClassName =
+    "com.openlauncher.app.debug.embedding.ActivityViewNavigationWidget"

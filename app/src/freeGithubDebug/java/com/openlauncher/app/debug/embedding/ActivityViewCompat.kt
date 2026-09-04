@@ -2,14 +2,20 @@ package com.openlauncher.app.debug.embedding
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.SystemClock
+import android.util.Log
 import android.view.InputDevice
 import android.view.InputEvent
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import java.lang.reflect.InvocationTargetException
 
@@ -20,12 +26,15 @@ import java.lang.reflect.InvocationTargetException
  * incomplete. No Play Paid or normal production launcher code should depend on it.
  */
 class ActivityViewCompat(
-    context: Context,
-    private val capabilities: EmbeddingCapabilities = EmbeddingCapabilities.detect(context),
-) : FrameLayout(context) {
+    private val hostContext: Context,
+    private val capabilities: EmbeddingCapabilities = EmbeddingCapabilities.detect(hostContext),
+) : FrameLayout(hostContext) {
     private val activityViewClass = runCatching { Class.forName(ActivityViewClassName) }.getOrNull()
     private val activityManagerCompat = runCatching { ActivityManagerCompat() }.getOrNull()
     private var activityView: View? = null
+    private var orientationGuard: View? = null
+    private var orientationGuardWindowManager: WindowManager? = null
+    private var pendingBackDispatch: Runnable? = null
     private var pendingFocusRestore: Runnable? = null
 
     val isAttached: Boolean
@@ -61,6 +70,9 @@ class ActivityViewCompat(
         val view = clazz
             .getConstructor(Context::class.java)
             .newInstance(context) as View
+        view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            notifyLocationChanged(view, clazz)
+        }
         activityView = view
         addView(
             view,
@@ -78,6 +90,7 @@ class ActivityViewCompat(
                 "External ActivityView launch requires INTERNAL_SYSTEM_WINDOW"
             }
         }
+        installOrientationGuardIfNeeded()
         val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
         clazz.getMethod("startActivity", Intent::class.java).invoke(activityView, intent)
         Unit
@@ -99,27 +112,63 @@ class ActivityViewCompat(
         val activityManager = activityManagerCompat
             ?: error("Android 9 IActivityManager compatibility bridge is unavailable")
         val previousStackId = activityManager.focusStackOnDisplay(displayId).getOrThrow()
-        try {
-            forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK)
-            forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
-        } catch (error: Throwable) {
-            activityManager.restoreFocusedStack(previousStackId).getOrThrow()
-            throw error
-        }
+        pendingBackDispatch?.let(view::removeCallbacks)
         pendingFocusRestore?.let(view::removeCallbacks)
-        pendingFocusRestore = Runnable {
-            pendingFocusRestore = null
-            activityManager.restoreFocusedStack(previousStackId)
-        }.also { restore ->
-            view.postDelayed(restore, FocusRestoreDelayMillis)
+        pendingBackDispatch = Runnable {
+            pendingBackDispatch = null
+            runCatching {
+                forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK)
+                forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
+            }.onFailure {
+                activityManager.restoreFocusedStack(previousStackId)
+            }.onSuccess {
+                pendingFocusRestore = Runnable {
+                    pendingFocusRestore = null
+                    activityManager.restoreFocusedStack(previousStackId)
+                }.also { restore ->
+                    view.postDelayed(restore, FocusRestoreDelayMillis)
+                }
+            }
+        }.also { dispatch ->
+            view.postDelayed(dispatch, BackFocusSettleMillis)
         }
+    }.mapFailure(::unwrap)
+
+    fun forwardMotionEvent(event: MotionEvent): Result<Unit> = runCatching {
+        val view = activityView ?: error("ActivityView is not attached")
+        val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
+        forwardInputEvent(view, clazz, event)
     }.mapFailure(::unwrap)
 
     fun release() {
         val view = activityView ?: return
+        val virtualDisplay = runCatching {
+            val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
+            val field = clazz.getDeclaredField("mVirtualDisplay").apply {
+                isAccessible = true
+            }
+            field.get(view) as? VirtualDisplay
+        }.getOrNull()
+        pendingBackDispatch?.let(view::removeCallbacks)
+        pendingBackDispatch = null
         pendingFocusRestore?.let(view::removeCallbacks)
         pendingFocusRestore = null
-        runCatching { activityViewClass?.getMethod("release")?.invoke(view) }
+        orientationGuard?.let { guard ->
+            runCatching { orientationGuardWindowManager?.removeViewImmediate(guard) }
+        }
+        orientationGuard = null
+        orientationGuardWindowManager = null
+        val hiddenRelease = runCatching {
+            val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
+            clazz.getMethod("release").invoke(view)
+        }
+        hiddenRelease.onFailure { error ->
+            Log.w(Tag, "Hidden ActivityView.release() failed; releasing captured VirtualDisplay", unwrap(error))
+            runCatching { virtualDisplay?.release() }
+                .onFailure { fallbackError ->
+                    Log.w(Tag, "Captured VirtualDisplay.release() fallback failed", fallbackError)
+                }
+        }
         removeView(view)
         activityView = null
     }
@@ -144,13 +193,6 @@ class ActivityViewCompat(
         action: Int,
         keyCode: Int,
     ) {
-        val forwarderField = clazz.getDeclaredField("mInputForwarder").apply {
-            isAccessible = true
-        }
-        val forwarder = forwarderField.get(view) ?: error("ActivityView input forwarder is unavailable")
-        val forwardEvent = forwarder.javaClass.methods.firstOrNull { method ->
-            method.name == "forwardEvent" && method.parameterTypes.size == 1
-        } ?: error("ActivityView input forwarder has no forwardEvent(InputEvent)")
         val whenMillis = SystemClock.uptimeMillis()
         val event = KeyEvent(
             whenMillis,
@@ -164,13 +206,70 @@ class ActivityViewCompat(
             KeyEvent.FLAG_FROM_SYSTEM or KeyEvent.FLAG_VIRTUAL_HARD_KEY,
             InputDevice.SOURCE_KEYBOARD,
         )
-        check(forwardEvent.invoke(forwarder, event) == true) {
-            "Key event was not forwarded into the ActivityView display"
+        forwardInputEvent(view, clazz, event)
+    }
+
+    private fun forwardInputEvent(
+        view: View,
+        clazz: Class<*>,
+        event: InputEvent,
+    ) {
+        val forwarderField = clazz.getDeclaredField("mInputForwarder").apply {
+            isAccessible = true
         }
+        val forwarder = forwarderField.get(view) ?: error("ActivityView input forwarder is unavailable")
+        val forwardEvent = forwarder.javaClass.methods.firstOrNull { method ->
+            method.name == "forwardEvent" && method.parameterTypes.size == 1
+        } ?: error("ActivityView input forwarder has no forwardEvent(InputEvent)")
+        check(forwardEvent.invoke(forwarder, event) == true) {
+            "Input event was not forwarded into the ActivityView display"
+        }
+    }
+
+    private fun notifyLocationChanged(view: View, clazz: Class<*>) {
+        runCatching { clazz.getMethod("onLocationChanged").invoke(view) }
+    }
+
+    private fun installOrientationGuardIfNeeded() {
+        if (orientationGuard != null) return
+        check(capabilities.internalSystemWindow) {
+            "ActivityView orientation guard requires INTERNAL_SYSTEM_WINDOW"
+        }
+        val displayId = virtualDisplayId ?: error("ActivityView virtual display is unavailable")
+        val displayManager = hostContext.getSystemService(DisplayManager::class.java)
+        val display = displayManager.getDisplay(displayId)
+            ?: error("ActivityView display $displayId is unavailable")
+        val displayContext = hostContext.createDisplayContext(display)
+        val windowManager = displayContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val guard = View(displayContext)
+        windowManager.addView(
+            guard,
+            WindowManager.LayoutParams(
+                1,
+                1,
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                // Android 9 maps app-requested portrait/landscape through the primary display's
+                // natural rotation even on secondary displays. ActivityView's virtual display is
+                // created in the pane's natural orientation, so keeping the secondary display at
+                // rotation 0 avoids orientation ping-pong in apps such as OsmAnd without changing
+                // the host display or rewriting another app's requested orientation.
+                screenOrientation = ActivityInfo.SCREEN_ORIENTATION_NOSENSOR
+                alpha = OrientationGuardAlpha
+            },
+        )
+        orientationGuardWindowManager = windowManager
+        orientationGuard = guard
     }
 
     companion object {
         private const val ActivityViewClassName = "android.app.ActivityView"
-        private const val FocusRestoreDelayMillis = 100L
+        private const val BackFocusSettleMillis = 200L
+        private const val FocusRestoreDelayMillis = 200L
+        private const val OrientationGuardAlpha = 0.01f
+        private const val Tag = "ActivityViewCompat"
     }
 }

@@ -75,6 +75,7 @@ import kotlinx.coroutines.flow.collect
 fun HomeRoute(
     navigationState: NavigationState = NavigationState(),
     navigationContent: @Composable BoxScope.() -> Unit = {},
+    navigationContentOwnsControls: Boolean = false,
     onNavigationClick: () -> Unit = {},
     mediaState: MediaState,
     onMediaClick: () -> Unit,
@@ -86,6 +87,7 @@ fun HomeRoute(
     HomeScreen(
         state = HomeUiState(navigation = navigationState, media = mediaState),
         navigationContent = navigationContent,
+        navigationContentOwnsControls = navigationContentOwnsControls,
         onSearchClick = onNavigationClick,
         onMediaClick = onMediaClick,
         onMediaSessionSelect = onMediaSessionSelect,
@@ -99,6 +101,7 @@ fun HomeRoute(
 fun HomeScreen(
     state: HomeUiState,
     navigationContent: @Composable BoxScope.() -> Unit = {},
+    navigationContentOwnsControls: Boolean = false,
     onSearchClick: () -> Unit = {},
     onStopNavigation: () -> Unit = {},
     onMediaClick: () -> Unit = {},
@@ -125,6 +128,7 @@ fun HomeScreen(
                 NavigationSurface(
                     state = state.navigation,
                     navigationContent = navigationContent,
+                    navigationContentOwnsControls = navigationContentOwnsControls,
                     onSearchClick = onSearchClick,
                     onStopNavigation = onStopNavigation,
                     modifier = Modifier
@@ -152,6 +156,7 @@ fun HomeScreen(
                 NavigationSurface(
                     state = state.navigation,
                     navigationContent = navigationContent,
+                    navigationContentOwnsControls = navigationContentOwnsControls,
                     onSearchClick = onSearchClick,
                     onStopNavigation = onStopNavigation,
                     modifier = Modifier
@@ -177,6 +182,7 @@ fun HomeScreen(
 private fun NavigationSurface(
     state: NavigationState,
     navigationContent: @Composable BoxScope.() -> Unit,
+    navigationContentOwnsControls: Boolean,
     onSearchClick: () -> Unit,
     onStopNavigation: () -> Unit,
     modifier: Modifier = Modifier,
@@ -187,6 +193,8 @@ private fun NavigationSurface(
             .background(CarColors.Surface),
     ) {
         navigationContent()
+
+        if (navigationContentOwnsControls) return@Box
 
         Surface(
             modifier = Modifier

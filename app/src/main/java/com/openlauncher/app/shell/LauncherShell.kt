@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -65,7 +66,9 @@ fun LauncherShell(
                             end = CarSpacing.Md,
                         ),
                 ) {
-                    content(state.destination, state::navigateTo)
+                    key(state.destination) {
+                        content(state.destination, state::navigateTo)
+                    }
                 }
 
                 Rail(
@@ -103,7 +106,9 @@ fun LauncherShell(
                             bottom = CarSpacing.Md,
                         ),
                 ) {
-                    content(state.destination, state::navigateTo)
+                    key(state.destination) {
+                        content(state.destination, state::navigateTo)
+                    }
                 }
             }
         }

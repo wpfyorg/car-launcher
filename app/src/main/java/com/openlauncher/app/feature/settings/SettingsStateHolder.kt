@@ -16,6 +16,7 @@ import com.openlauncher.app.data.settings.TextSizePreset
 import com.openlauncher.app.feature.navigation.offline.OfflineMapRegion
 import com.openlauncher.app.feature.navigation.offline.OfflineMapRepository
 import com.openlauncher.app.feature.navigation.offline.UnavailableOfflineMapRepository
+import com.openlauncher.app.feature.navigation.external.NavigationEmbeddingSession
 import com.openlauncher.app.launcher.AppCatalog
 import com.openlauncher.app.launcher.LauncherApp
 import kotlinx.coroutines.CoroutineScope
@@ -75,6 +76,9 @@ class SettingsStateHolder(
     }
 
     fun setNavigationApp(app: LauncherApp?) = update {
+        if (uiState.settings.navigationAppKey != app?.stableKey) {
+            if (!NavigationEmbeddingSession.releaseActive()) return@update
+        }
         settingsRepository.setNavigationApp(app?.stableKey)
     }
 

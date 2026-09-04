@@ -102,6 +102,7 @@ fun CarLauncherApp() {
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             },
+                            navigationContentOwnsControls = navigationApp != null,
                             onNavigationClick = { navigateTo(ShellDestination.Settings) },
                             mediaState = mediaState,
                             onMediaClick = { navigateTo(ShellDestination.Media) },
