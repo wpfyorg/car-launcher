@@ -63,7 +63,11 @@ fun EmbeddedNavigationHost(
         val message = when (val state = hostState) {
             EmbeddingHostState.Idle,
             EmbeddingHostState.SurfaceReady,
+            EmbeddingHostState.Launching,
+            EmbeddingHostState.Stopping,
             -> null
+
+            EmbeddingHostState.Stopped -> "Navigation stopped · tap the pane to resume"
 
             is EmbeddingHostState.Running -> when {
                 !supportsInteractiveEmbedding ->
@@ -92,7 +96,11 @@ fun EmbeddedNavigationHost(
 
 private fun createEmbeddedNavigationView(context: Context): View {
     val privilegedDebugView = runCatching {
-        Class.forName(PrivilegedDebugViewClassName)
+        val clazz = Class.forName(PrivilegedDebugViewClassName)
+        runCatching {
+            clazz.getMethod("acquire", Context::class.java)
+                .invoke(null, context) as? View
+        }.getOrNull() ?: clazz
             .getConstructor(Context::class.java)
             .newInstance(context) as? View
     }.getOrNull()

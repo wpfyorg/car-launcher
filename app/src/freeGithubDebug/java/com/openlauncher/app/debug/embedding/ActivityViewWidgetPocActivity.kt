@@ -31,7 +31,7 @@ class ActivityViewWidgetPocActivity : Activity() {
             setPadding(16, 10, 16, 10)
             text = "Waiting for target"
         }
-        widget = ActivityViewNavigationWidget(this)
+        widget = ActivityViewNavigationWidget.acquire(this) as ActivityViewNavigationWidget
 
         setContentView(
             FrameLayout(this).apply {
@@ -81,13 +81,16 @@ class ActivityViewWidgetPocActivity : Activity() {
         val app = LauncherApp(component = component, label = label)
         statusView.text = "Starting $label"
         widget.bind(app) { state -> renderState(label, state) }
-        widget.ensureRunning()
+        NavigationEmbeddingEngine.get(this).selectProviderForDebug(app)
     }
 
     private fun renderState(label: String, state: EmbeddingHostState) {
         statusView.text = when (state) {
             EmbeddingHostState.Idle -> "$label · idle"
             EmbeddingHostState.SurfaceReady -> "$label · surface ready"
+            EmbeddingHostState.Launching -> "$label · launching"
+            EmbeddingHostState.Stopping -> "$label · stopping"
+            EmbeddingHostState.Stopped -> "$label · stopped · tap pane to resume"
             is EmbeddingHostState.Running -> "$label · running on display ${state.displayId}"
             is EmbeddingHostState.Unavailable -> "$label · unavailable: ${state.reason}"
             is EmbeddingHostState.Failed -> "$label · failed: ${state.reason}"

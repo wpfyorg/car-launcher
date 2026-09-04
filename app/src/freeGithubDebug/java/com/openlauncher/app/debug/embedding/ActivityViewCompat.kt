@@ -30,12 +30,12 @@ class ActivityViewCompat(
     private val capabilities: EmbeddingCapabilities = EmbeddingCapabilities.detect(hostContext),
 ) : FrameLayout(hostContext) {
     private val activityViewClass = runCatching { Class.forName(ActivityViewClassName) }.getOrNull()
-    private val activityManagerCompat = runCatching { ActivityManagerCompat() }.getOrNull()
+    private val activityManagerCompat = runCatching { ActivityManagerCompat(hostContext) }.getOrNull()
     private var activityView: View? = null
     private var orientationGuard: View? = null
     private var orientationGuardWindowManager: WindowManager? = null
-    private var pendingBackDispatch: Runnable? = null
-    private var pendingFocusRestore: Runnable? = null
+    private var hostOrientationGuard: View? = null
+    private var hostOrientationGuardWindowManager: WindowManager? = null
 
     val isAttached: Boolean
         get() = activityView != null
@@ -64,6 +64,7 @@ class ActivityViewCompat(
         check(capabilities.canHostOwnedActivity) {
             "ActivityView host requirements missing: ${capabilities.summary()}"
         }
+        installHostOrientationGuardIfNeeded()
         if (activityView != null) return Result.success(Unit)
 
         val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
@@ -90,6 +91,7 @@ class ActivityViewCompat(
                 "External ActivityView launch requires INTERNAL_SYSTEM_WINDOW"
             }
         }
+        installHostOrientationGuardIfNeeded()
         installOrientationGuardIfNeeded()
         val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
         clazz.getMethod("startActivity", Intent::class.java).invoke(activityView, intent)
@@ -111,30 +113,21 @@ class ActivityViewCompat(
         val displayId = virtualDisplayId ?: error("ActivityView virtual display is unavailable")
         val activityManager = activityManagerCompat
             ?: error("Android 9 IActivityManager compatibility bridge is unavailable")
-        val previousStackId = activityManager.focusStackOnDisplay(displayId).getOrThrow()
-        pendingBackDispatch?.let(view::removeCallbacks)
-        pendingFocusRestore?.let(view::removeCallbacks)
-        pendingBackDispatch = Runnable {
-            pendingBackDispatch = null
-            runCatching {
-                forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK)
-                forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
-            }.onFailure {
-                activityManager.restoreFocusedStack(previousStackId)
-            }.onSuccess {
-                pendingFocusRestore = Runnable {
-                    pendingFocusRestore = null
-                    activityManager.restoreFocusedStack(previousStackId)
-                }.also { restore ->
-                    view.postDelayed(restore, FocusRestoreDelayMillis)
-                }
-            }
-        }.also { dispatch ->
-            view.postDelayed(dispatch, BackFocusSettleMillis)
+        activityManager.focusStackOnDisplay(displayId).getOrThrow()
+        check(activityManager.focusedStackDisplayId().getOrThrow() == displayId) {
+            "Navigation display $displayId did not become focused"
         }
+        forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK)
+        forwardDisplayKeyEvent(view, clazz, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK)
     }.mapFailure(::unwrap)
 
     fun forwardMotionEvent(event: MotionEvent): Result<Unit> = runCatching {
+        val view = activityView ?: error("ActivityView is not attached")
+        val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
+        forwardInputEvent(view, clazz, event)
+    }.mapFailure(::unwrap)
+
+    fun forwardKeyEvent(event: KeyEvent): Result<Unit> = runCatching {
         val view = activityView ?: error("ActivityView is not attached")
         val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
         forwardInputEvent(view, clazz, event)
@@ -149,15 +142,16 @@ class ActivityViewCompat(
             }
             field.get(view) as? VirtualDisplay
         }.getOrNull()
-        pendingBackDispatch?.let(view::removeCallbacks)
-        pendingBackDispatch = null
-        pendingFocusRestore?.let(view::removeCallbacks)
-        pendingFocusRestore = null
         orientationGuard?.let { guard ->
             runCatching { orientationGuardWindowManager?.removeViewImmediate(guard) }
         }
         orientationGuard = null
         orientationGuardWindowManager = null
+        hostOrientationGuard?.let { guard ->
+            runCatching { hostOrientationGuardWindowManager?.removeViewImmediate(guard) }
+        }
+        hostOrientationGuard = null
+        hostOrientationGuardWindowManager = null
         val hiddenRelease = runCatching {
             val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
             clazz.getMethod("release").invoke(view)
@@ -171,11 +165,6 @@ class ActivityViewCompat(
         }
         removeView(view)
         activityView = null
-    }
-
-    override fun onDetachedFromWindow() {
-        release()
-        super.onDetachedFromWindow()
     }
 
     private fun <T> Result<T>.mapFailure(transform: (Throwable) -> Throwable): Result<T> =
@@ -265,10 +254,37 @@ class ActivityViewCompat(
         orientationGuard = guard
     }
 
+    private fun installHostOrientationGuardIfNeeded() {
+        if (hostOrientationGuard != null) return
+        check(capabilities.internalSystemWindow) {
+            "Host orientation guard requires INTERNAL_SYSTEM_WINDOW"
+        }
+        val windowManager = hostContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val guard = View(hostContext)
+        windowManager.addView(
+            guard,
+            WindowManager.LayoutParams(
+                1,
+                1,
+                WindowManager.LayoutParams.TYPE_SYSTEM_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                // API 28 has one globally focused stack. A focused task on an ActivityView display
+                // can therefore temporarily drive display 0's rotation despite MainActivity's
+                // landscape manifest request. Keep the car launcher display landscape while the
+                // embedded session owns global focus.
+                screenOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                alpha = OrientationGuardAlpha
+            },
+        )
+        hostOrientationGuardWindowManager = windowManager
+        hostOrientationGuard = guard
+    }
+
     companion object {
         private const val ActivityViewClassName = "android.app.ActivityView"
-        private const val BackFocusSettleMillis = 200L
-        private const val FocusRestoreDelayMillis = 200L
         private const val OrientationGuardAlpha = 0.01f
         private const val Tag = "ActivityViewCompat"
     }
