@@ -64,6 +64,10 @@ internal class ActivityViewNavigationWidget(context: Context) :
 
     override fun performBackPress(): Boolean = engine.performBack()
 
+    override fun stop(): Boolean = engine.stopSelected()
+
+    override fun restart(): Boolean = engine.restartSelected()
+
     override fun release() {
         // AndroidView.onRelease only means the Compose holder was disposed. The Activity-scoped
         // ActivityView stays alive until the Activity itself is destroyed.
@@ -137,6 +141,10 @@ internal class ActivityViewNavigationWidget(context: Context) :
         private var retainedActivity: Activity? = null
         private var retainedHost: ActivityViewNavigationWidget? = null
         private var lifecycleCallbacksRegistered = false
+
+        @JvmStatic
+        fun isSupported(context: Context): Boolean =
+            EmbeddingCapabilities.detect(context).canHostExternalActivity
 
         @JvmStatic
         fun acquire(context: Context): View {

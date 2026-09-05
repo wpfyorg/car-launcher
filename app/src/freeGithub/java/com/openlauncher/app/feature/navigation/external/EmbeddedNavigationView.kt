@@ -17,5 +17,9 @@ internal interface EmbeddedNavigationView {
 
     fun performBackPress(): Boolean = false
 
+    fun stop(): Boolean = false
+
+    fun restart(): Boolean = false
+
     fun release() = Unit
 }

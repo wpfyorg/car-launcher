@@ -76,6 +76,7 @@ fun HomeRoute(
     navigationState: NavigationState = NavigationState(),
     navigationContent: @Composable BoxScope.() -> Unit = {},
     navigationContentOwnsControls: Boolean = false,
+    navigationExpanded: Boolean = false,
     onNavigationClick: () -> Unit = {},
     mediaState: MediaState,
     onMediaClick: () -> Unit,
@@ -88,6 +89,7 @@ fun HomeRoute(
         state = HomeUiState(navigation = navigationState, media = mediaState),
         navigationContent = navigationContent,
         navigationContentOwnsControls = navigationContentOwnsControls,
+        navigationExpanded = navigationExpanded,
         onSearchClick = onNavigationClick,
         onMediaClick = onMediaClick,
         onMediaSessionSelect = onMediaSessionSelect,
@@ -102,6 +104,7 @@ fun HomeScreen(
     state: HomeUiState,
     navigationContent: @Composable BoxScope.() -> Unit = {},
     navigationContentOwnsControls: Boolean = false,
+    navigationExpanded: Boolean = false,
     onSearchClick: () -> Unit = {},
     onStopNavigation: () -> Unit = {},
     onMediaClick: () -> Unit = {},
@@ -118,7 +121,16 @@ fun HomeScreen(
             else -> 304.dp
         }
 
-        if (isPortraitFamily) {
+        if (navigationExpanded) {
+            NavigationSurface(
+                state = state.navigation,
+                navigationContent = navigationContent,
+                navigationContentOwnsControls = navigationContentOwnsControls,
+                onSearchClick = onSearchClick,
+                onStopNavigation = onStopNavigation,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (isPortraitFamily) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()

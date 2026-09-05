@@ -8,6 +8,8 @@ import com.openlauncher.app.launcher.LauncherApp
 fun DistributionNavigationHomeContent(
     app: LauncherApp?,
     compatibilityMode: Boolean,
+    expanded: Boolean = false,
+    onExpandedChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     // Paid navigation will render the native MapLibre/Ferrostar surface in later phases.

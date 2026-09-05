@@ -4,10 +4,22 @@ import android.content.Context
 import android.view.View
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +37,8 @@ import com.openlauncher.app.launcher.LauncherApp
 fun EmbeddedNavigationHost(
     app: LauncherApp,
     compatibilityMode: Boolean,
+    expanded: Boolean = false,
+    onExpandedChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var hostState by remember(app.stableKey) {
@@ -36,6 +50,8 @@ fun EmbeddedNavigationHost(
     var embeddedView by remember(app.stableKey) {
         mutableStateOf<EmbeddedNavigationView?>(null)
     }
+    val canStop = hostState is EmbeddingHostState.Running
+    val canRestart = canStop || hostState == EmbeddingHostState.Stopped || hostState is EmbeddingHostState.Failed
 
     BackHandler(
         enabled = embeddedView?.supportsEmbeddedBack == true && hostState is EmbeddingHostState.Running,
@@ -59,6 +75,54 @@ fun EmbeddedNavigationHost(
             },
             modifier = Modifier.fillMaxSize(),
         )
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(10.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = Color.Black.copy(alpha = 0.62f),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = { onExpandedChange(!expanded) },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen,
+                        contentDescription = if (expanded) "Collapse navigation" else "Expand navigation",
+                        tint = Color.White,
+                    )
+                }
+                if (supportsInteractiveEmbedding) {
+                    IconButton(
+                        onClick = { embeddedView?.restart() },
+                        enabled = canRestart,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Restart navigation app",
+                            tint = Color.White,
+                        )
+                    }
+                    IconButton(
+                        onClick = { embeddedView?.stop() },
+                        enabled = canStop,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close navigation app",
+                            tint = Color.White,
+                        )
+                    }
+                }
+            }
+        }
 
         val message = when (val state = hostState) {
             EmbeddingHostState.Idle,
@@ -97,6 +161,10 @@ fun EmbeddedNavigationHost(
 private fun createEmbeddedNavigationView(context: Context): View {
     val privilegedDebugView = runCatching {
         val clazz = Class.forName(PrivilegedDebugViewClassName)
+        val supported = clazz
+            .getMethod("isSupported", Context::class.java)
+            .invoke(null, context) as? Boolean == true
+        if (!supported) return@runCatching null
         runCatching {
             clazz.getMethod("acquire", Context::class.java)
                 .invoke(null, context) as? View

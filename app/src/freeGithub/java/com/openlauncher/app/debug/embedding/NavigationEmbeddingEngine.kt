@@ -170,6 +170,48 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         launchSelected(reason = "pane tap resume")
     }
 
+    fun stopSelected(): Boolean {
+        if (hostDestroying || currentState !is EmbeddingHostState.Running) return false
+        val provider = selectedProvider ?: return false
+        val ownership = currentOwnership ?: resolveLaunchPlan(provider.app).ownership
+        val stopGeneration = ++generation
+        stoppedGeneration = null
+        stoppedRuntimePackages = emptySet()
+        stopRuntime(ownership, stopGeneration, reason = "explicit stop") {
+            activeTaskId = null
+            currentOwnership = null
+            clearPersistedTask(provider.app.stableKey)
+            transition(EmbeddingHostState.Stopped)
+        }
+        return true
+    }
+
+    fun restartSelected(): Boolean {
+        if (
+            hostDestroying ||
+            currentState !is EmbeddingHostState.Running &&
+            currentState != EmbeddingHostState.Stopped &&
+            currentState !is EmbeddingHostState.Failed
+        ) {
+            return false
+        }
+        val provider = selectedProvider ?: return false
+        val ownership = currentOwnership ?: resolveLaunchPlan(provider.app).ownership
+        val restartGeneration = ++generation
+        stoppedGeneration = null
+        stoppedRuntimePackages = emptySet()
+        stopRuntime(ownership, restartGeneration, reason = "explicit restart") {
+            activeTaskId = null
+            currentOwnership = null
+            clearPersistedTask(provider.app.stableKey)
+            if (selectedProvider?.app?.stableKey == provider.app.stableKey) {
+                transition(EmbeddingHostState.SurfaceReady)
+                launchSelected("explicit restart")
+            }
+        }
+        return true
+    }
+
     /** Debug POC entry point; production provider selection is driven by SettingsRepository. */
     fun selectProviderForDebug(app: LauncherApp?) {
         selectProvider(app, source = "debug")

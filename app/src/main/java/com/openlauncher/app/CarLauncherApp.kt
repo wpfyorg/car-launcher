@@ -10,7 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import com.openlauncher.app.data.settings.StartupScreen
@@ -85,6 +87,9 @@ fun CarLauncherApp() {
                         val navigationApp = settingsState.apps.firstOrNull {
                             it.stableKey == navigationAppKey
                         }
+                        var navigationExpanded by remember(navigationApp?.stableKey) {
+                            mutableStateOf(false)
+                        }
                         HomeRoute(
                             navigationState = NavigationState(
                                 error = if (navigationAppKey != null && navigationApp == null) {
@@ -99,10 +104,13 @@ fun CarLauncherApp() {
                                     compatibilityMode =
                                         DistributionFeatures.supportsNavigationCompatibilityMode &&
                                             settingsState.settings.navigationCompatibilityMode,
+                                    expanded = navigationExpanded,
+                                    onExpandedChange = { navigationExpanded = it },
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             },
                             navigationContentOwnsControls = navigationApp != null,
+                            navigationExpanded = navigationExpanded,
                             onNavigationClick = { navigateTo(ShellDestination.Settings) },
                             mediaState = mediaState,
                             onMediaClick = { navigateTo(ShellDestination.Media) },
