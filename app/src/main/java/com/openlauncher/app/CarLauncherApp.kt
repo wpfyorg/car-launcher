@@ -109,7 +109,8 @@ fun CarLauncherApp() {
                                     modifier = Modifier.fillMaxSize(),
                                 )
                             },
-                            navigationContentOwnsControls = navigationApp != null,
+                            navigationContentOwnsControls =
+                                navigationApp != null || DistributionFeatures.supportsNativeNavigation,
                             navigationExpanded = navigationExpanded,
                             onNavigationClick = { navigateTo(ShellDestination.Settings) },
                             mediaState = mediaState,

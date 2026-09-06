@@ -1,7 +1,13 @@
 package com.openlauncher.app.feature.navigation.external
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.openlauncher.app.feature.navigation.integrated.MapLibreNavigationSurface
+import com.openlauncher.app.feature.navigation.integrated.MapRenderState
 import com.openlauncher.app.launcher.LauncherApp
 
 @Composable
@@ -12,5 +18,10 @@ fun DistributionNavigationHomeContent(
     onExpandedChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    // Paid navigation will render the native MapLibre/Ferrostar surface in later phases.
+    var renderState by remember { mutableStateOf(MapRenderState()) }
+    MapLibreNavigationSurface(
+        state = renderState,
+        onStateChange = { renderState = it },
+        modifier = modifier,
+    )
 }
