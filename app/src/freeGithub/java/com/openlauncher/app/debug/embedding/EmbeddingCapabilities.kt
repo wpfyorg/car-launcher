@@ -14,6 +14,8 @@ data class EmbeddingCapabilities(
     val manageActivityStacks: Boolean,
     val startAnyActivity: Boolean,
     val startTasksFromRecents: Boolean,
+    val removeTasks: Boolean,
+    val forceStopPackages: Boolean,
 ) {
     val strategy: EmbeddingStrategy
         get() = when {
@@ -28,7 +30,13 @@ data class EmbeddingCapabilities(
             injectEvents
 
     val canHostExternalActivity: Boolean
-        get() = canHostOwnedActivity && internalSystemWindow
+        get() = canHostOwnedActivity &&
+            internalSystemWindow &&
+            manageActivityStacks &&
+            startAnyActivity &&
+            startTasksFromRecents &&
+            removeTasks &&
+            forceStopPackages
 
     fun summary(): String = buildString {
         append("strategy=")
@@ -51,6 +59,10 @@ data class EmbeddingCapabilities(
         append(yesNo(startAnyActivity))
         append(" startRecents=")
         append(yesNo(startTasksFromRecents))
+        append(" removeTasks=")
+        append(yesNo(removeTasks))
+        append(" forceStop=")
+        append(yesNo(forceStopPackages))
     }
 
     companion object {
@@ -68,6 +80,8 @@ data class EmbeddingCapabilities(
                 manageActivityStacks = context.hasPermission(ManageActivityStacksPermission),
                 startAnyActivity = context.hasPermission(StartAnyActivityPermission),
                 startTasksFromRecents = context.hasPermission(StartTasksFromRecentsPermission),
+                removeTasks = context.hasPermission(RemoveTasksPermission),
+                forceStopPackages = context.hasPermission(ForceStopPackagesPermission),
             )
         }
 
@@ -85,6 +99,8 @@ data class EmbeddingCapabilities(
         private const val ManageActivityStacksPermission = "android.permission.MANAGE_ACTIVITY_STACKS"
         private const val StartAnyActivityPermission = "android.permission.START_ANY_ACTIVITY"
         private const val StartTasksFromRecentsPermission = "android.permission.START_TASKS_FROM_RECENTS"
+        private const val RemoveTasksPermission = "android.permission.REMOVE_TASKS"
+        private const val ForceStopPackagesPermission = "android.permission.FORCE_STOP_PACKAGES"
 
         private val TaskViewClassNames = listOf(
             "android.app.TaskView",

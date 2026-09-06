@@ -64,6 +64,9 @@ class ActivityViewCompat(
         check(capabilities.canHostOwnedActivity) {
             "ActivityView host requirements missing: ${capabilities.summary()}"
         }
+        check(capabilities.internalSystemWindow) {
+            "Host orientation guard requires INTERNAL_SYSTEM_WINDOW"
+        }
         installHostOrientationGuardIfNeeded()
         if (activityView != null) return Result.success(Unit)
 
@@ -134,14 +137,6 @@ class ActivityViewCompat(
     }.mapFailure(::unwrap)
 
     fun release() {
-        val view = activityView ?: return
-        val virtualDisplay = runCatching {
-            val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
-            val field = clazz.getDeclaredField("mVirtualDisplay").apply {
-                isAccessible = true
-            }
-            field.get(view) as? VirtualDisplay
-        }.getOrNull()
         orientationGuard?.let { guard ->
             runCatching { orientationGuardWindowManager?.removeViewImmediate(guard) }
         }
@@ -152,6 +147,14 @@ class ActivityViewCompat(
         }
         hostOrientationGuard = null
         hostOrientationGuardWindowManager = null
+        val view = activityView ?: return
+        val virtualDisplay = runCatching {
+            val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
+            val field = clazz.getDeclaredField("mVirtualDisplay").apply {
+                isAccessible = true
+            }
+            field.get(view) as? VirtualDisplay
+        }.getOrNull()
         val hiddenRelease = runCatching {
             val clazz = activityViewClass ?: error("android.app.ActivityView is unavailable")
             clazz.getMethod("release").invoke(view)

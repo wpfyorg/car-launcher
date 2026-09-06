@@ -28,6 +28,7 @@ internal class ActivityViewNavigationWidget(context: Context) :
     private var stateListener: (EmbeddingHostState) -> Unit = {}
     private var readyPollCount = 0
     private var permanentlyReleased = false
+    private var localHostFailure = false
 
     override val supportsInteractiveEmbedding: Boolean
         get() = capabilities.canHostExternalActivity
@@ -66,7 +67,14 @@ internal class ActivityViewNavigationWidget(context: Context) :
 
     override fun stop(): Boolean = engine.stopSelected()
 
-    override fun restart(): Boolean = engine.restartSelected()
+    override fun restart(): Boolean {
+        if (engine.restartSelected()) return true
+        if (!localHostFailure || permanentlyReleased) return false
+        localHostFailure = false
+        activityView.release()
+        attachActivityView()
+        return true
+    }
 
     override fun release() {
         // AndroidView.onRelease only means the Compose holder was disposed. The Activity-scoped
@@ -91,10 +99,12 @@ internal class ActivityViewNavigationWidget(context: Context) :
     private fun attachActivityView() {
         activityView.attach().fold(
             onSuccess = {
+                localHostFailure = false
                 readyPollCount = 0
                 waitForReady()
             },
             onFailure = { error ->
+                localHostFailure = true
                 onEngineStateChanged(
                     EmbeddingHostState.Failed(
                         "ActivityView unavailable: ${error.message ?: error.javaClass.simpleName}",
@@ -107,10 +117,12 @@ internal class ActivityViewNavigationWidget(context: Context) :
     private fun waitForReady() {
         if (permanentlyReleased) return
         if (activityView.virtualDisplayId != null) {
+            localHostFailure = false
             engine.onHostReady(this)
             return
         }
         if (readyPollCount++ >= MaxReadyPolls) {
+            localHostFailure = true
             onEngineStateChanged(EmbeddingHostState.Failed("ActivityView did not become ready"))
             return
         }

@@ -121,61 +121,48 @@ fun HomeScreen(
             else -> 304.dp
         }
 
-        if (navigationExpanded) {
-            NavigationSurface(
-                state = state.navigation,
-                navigationContent = navigationContent,
-                navigationContentOwnsControls = navigationContentOwnsControls,
-                onSearchClick = onSearchClick,
-                onStopNavigation = onStopNavigation,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else if (isPortraitFamily) {
-            Column(
+        val navigationModifier = when {
+            navigationExpanded -> Modifier.fillMaxSize()
+            isPortraitFamily -> Modifier
+                .align(Alignment.TopStart)
+                .padding(top = CarSpacing.Md, end = CarSpacing.Md)
+                .fillMaxWidth()
+                .height(maxHeight - 196.dp - (CarSpacing.Md * 3))
+            else -> Modifier
+                .align(Alignment.CenterStart)
+                .width(maxWidth - contextWidth - CarSpacing.Md)
+                .fillMaxHeight()
+        }
+        NavigationSurface(
+            state = state.navigation,
+            navigationContent = navigationContent,
+            navigationContentOwnsControls = navigationContentOwnsControls,
+            onSearchClick = onSearchClick,
+            onStopNavigation = onStopNavigation,
+            modifier = navigationModifier,
+        )
+
+        if (!navigationExpanded && isPortraitFamily) {
+            MediaCard(
+                state = state.media,
+                onClick = onMediaClick,
+                onSessionSelect = onMediaSessionSelect,
+                onPlayPause = onMediaPlayPause,
+                onPrevious = onMediaPrevious,
+                onNext = onMediaNext,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = CarSpacing.Md, end = CarSpacing.Md, bottom = CarSpacing.Md),
-                verticalArrangement = Arrangement.spacedBy(CarSpacing.Md),
+                    .align(Alignment.BottomStart)
+                    .padding(end = CarSpacing.Md, bottom = CarSpacing.Md)
+                    .fillMaxWidth()
+                    .height(196.dp),
+            )
+        } else if (!navigationExpanded) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(contextWidth)
+                    .fillMaxHeight(),
             ) {
-                NavigationSurface(
-                    state = state.navigation,
-                    navigationContent = navigationContent,
-                    navigationContentOwnsControls = navigationContentOwnsControls,
-                    onSearchClick = onSearchClick,
-                    onStopNavigation = onStopNavigation,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                )
-
-                MediaCard(
-                    state = state.media,
-                    onClick = onMediaClick,
-                    onSessionSelect = onMediaSessionSelect,
-                    onPlayPause = onMediaPlayPause,
-                    onPrevious = onMediaPrevious,
-                    onNext = onMediaNext,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(196.dp),
-                )
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(CarSpacing.Md),
-            ) {
-                NavigationSurface(
-                    state = state.navigation,
-                    navigationContent = navigationContent,
-                    navigationContentOwnsControls = navigationContentOwnsControls,
-                    onSearchClick = onSearchClick,
-                    onStopNavigation = onStopNavigation,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                )
-
                 ContextColumn(
                     media = state.media,
                     onMediaClick = onMediaClick,

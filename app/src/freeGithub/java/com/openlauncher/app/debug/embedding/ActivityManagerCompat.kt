@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.Bundle
 import android.os.Process
+import android.util.Log
 
 /** Minimal Android 9 hidden-API bridge used by the privileged ActivityView path. */
 internal class ActivityManagerCompat(context: Context? = null) {
@@ -159,8 +160,20 @@ internal class ActivityManagerCompat(context: Context? = null) {
             }
         }
 
-        taskIds.forEach { taskId -> removeTask(taskId).getOrThrow() }
-        taskIds
+        val removedTaskIds = linkedSetOf<Int>()
+        taskIds.forEach { taskId ->
+            removeTask(taskId).fold(
+                onSuccess = { removed ->
+                    if (removed) {
+                        removedTaskIds += taskId
+                    } else {
+                        Log.w(Tag, "removeTask($taskId) returned false")
+                    }
+                },
+                onFailure = { error -> Log.w(Tag, "removeTask($taskId) failed", error) },
+            )
+        }
+        removedTaskIds
     }
 
     fun forceStopPackage(packageName: String): Result<Unit> = runCatching {
@@ -225,6 +238,7 @@ internal class ActivityManagerCompat(context: Context? = null) {
         javaClass.getField(name).get(this)
 
     private companion object {
+        const val Tag = "ActivityManagerCompat"
         const val MaxRecentTasks = 200
         const val PerUserRange = 100_000
     }

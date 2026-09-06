@@ -65,7 +65,7 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
     private var stoppedGeneration: Int? = null
     private var stoppedRuntimePackages: Set<String> = emptySet()
     private var stoppedLaunchWallTimeMillis = 0L
-    private val seenRuntimePackages = linkedSetOf<String>()
+    private val seenOwnedTaskPackages = linkedSetOf<String>()
 
     // Declared before init because registerCrashReceiver() runs during construction.
     private val crashReceiver = object : BroadcastReceiver() {
@@ -113,7 +113,7 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
 
     fun attachHost(host: NavigationEmbeddingHostBridge) {
         hostReference = WeakReference(host)
-        hostDestroying = false
+        hostReady = false
         host.onEngineStateChanged(currentState)
     }
 
@@ -151,7 +151,10 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         handler.postDelayed(
             {
                 val count = activityViewDisplayCount()
-                if (count != 0) invariantFailure("host released with $count ActivityView displays")
+                val expectedCount = if (hostReference.get() == null) 0 else 1
+                if (count != expectedCount) {
+                    invariantFailure("host released with $count ActivityView displays; expected=$expectedCount")
+                }
             },
             InvariantSettleMillis,
         )
@@ -236,7 +239,7 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
                 activeTaskId = null
                 currentOwnership = null
                 previous?.app?.stableKey?.let(::clearPersistedTask)
-                assertNoTasks(previousOwnership.runtimePackages, "provider switch completed")
+                assertNoTasks(ownedTaskPackages(previousOwnership), "provider switch completed")
                 if (app == null) transition(EmbeddingHostState.Idle) else launchSelected("provider switch")
             }
         } else if (app == null) {
@@ -292,7 +295,7 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
                 )
                 currentOwnership = ownership
                 activeTaskId = snapshot.taskId
-                seenRuntimePackages += ownership.runtimePackages
+                seenOwnedTaskPackages += ownedTaskPackages(ownership)
                 launchWallTimeMillis = System.currentTimeMillis()
                 val launchGeneration = ++generation
                 transition(EmbeddingHostState.Launching)
@@ -314,11 +317,11 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
 
         val plan = resolveLaunchPlan(provider.app)
         currentOwnership = plan.ownership
-        seenRuntimePackages += plan.ownership.runtimePackages
+        seenOwnedTaskPackages += ownedTaskPackages(plan.ownership)
         val launchGeneration = ++generation
         transition(EmbeddingHostState.Launching)
         Log.i(Tag, "launching ${provider.app.packageName} reason=$reason runtime=${plan.ownership.runtimePackages}")
-        activityManager.purgeTasks(plan.ownership.runtimePackages).fold(
+        activityManager.purgeTasks(ownedTaskPackages(plan.ownership)).fold(
             onSuccess = { waitForLaunchPurge(provider, plan, displayId, launchGeneration, attempt = 0) },
             onFailure = { fail("Unable to purge old ${provider.app.label} tasks", it) },
         )
@@ -334,7 +337,7 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         handler.postDelayed(
             {
                 if (!isCurrent(provider, launchGeneration)) return@postDelayed
-                activityManager.findTasksByBasePackages(plan.ownership.runtimePackages).fold(
+                activityManager.findTasksByBasePackages(ownedTaskPackages(plan.ownership)).fold(
                     onSuccess = { tasks ->
                         if (tasks.isEmpty()) {
                             startLaunchIntent(provider, plan, displayId, launchGeneration)
@@ -590,10 +593,18 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         onStopped: () -> Unit,
     ) {
         transition(EmbeddingHostState.Stopping)
-        activityManager.purgeTasks(ownership.runtimePackages)
+        val trackedTaskId = activeTaskId.takeIf { currentOwnership?.appKey == ownership.appKey }
+        val trackedDisplayId = hostReference.get()?.navigationDisplayId
+        trackedTaskId?.let { taskId ->
+            activityManager.removeTask(taskId)
+                .onFailure { Log.w(Tag, "$reason tracked task removal failed task=$taskId", it) }
+        }
+        activityManager.purgeTasks(ownedTaskPackages(ownership))
             .onFailure { Log.w(Tag, "$reason initial task purge failed", it) }
         waitForRuntimeGone(
             ownership = ownership,
+            trackedTaskId = trackedTaskId,
+            trackedDisplayId = trackedDisplayId,
             generation = generation,
             reason = reason,
             attempt = 0,
@@ -604,6 +615,8 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
 
     private fun waitForRuntimeGone(
         ownership: RuntimeOwnership,
+        trackedTaskId: Int?,
+        trackedDisplayId: Int?,
         generation: Int,
         reason: String,
         attempt: Int,
@@ -613,10 +626,13 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         handler.postDelayed(
             {
                 if (generation != this.generation) return@postDelayed
-                activityManager.findTasksByBasePackages(ownership.runtimePackages).fold(
+                findTasksToStop(ownership, trackedTaskId, trackedDisplayId).fold(
                     onSuccess = { tasks ->
                         if (tasks.isEmpty()) {
-                            Log.i(Tag, "$reason observed runtime gone packages=${ownership.runtimePackages}")
+                            Log.i(
+                                Tag,
+                                "$reason observed runtime gone owned=${ownedTaskPackages(ownership)} tracked=$trackedTaskId",
+                            )
                             onStopped()
                             return@fold
                         }
@@ -628,9 +644,11 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
                                     activityManager.forceStopPackage(packageName)
                                         .onFailure { Log.w(Tag, "$reason force-stop failed package=$packageName", it) }
                                 }
-                                activityManager.purgeTasks(ownership.runtimePackages)
+                                activityManager.purgeTasks(ownedTaskPackages(ownership))
                                 waitForRuntimeGone(
                                     ownership,
+                                    trackedTaskId,
+                                    trackedDisplayId,
                                     generation,
                                     reason,
                                     attempt = 0,
@@ -649,6 +667,8 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
                             }
                             waitForRuntimeGone(
                                 ownership,
+                                trackedTaskId,
+                                trackedDisplayId,
                                 generation,
                                 reason,
                                 attempt + 1,
@@ -688,10 +708,48 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         appKey?.let(::clearPersistedTask)
         activeTaskId = null
         currentOwnership = null
-        if (hostReference.get() === host) hostReference.clear()
-        hostDestroying = false
-        transition(EmbeddingHostState.Idle)
+        val replacementAttached = hostReference.get()?.let { it !== host } == true
+        if (!replacementAttached && hostReference.get() === host) {
+            hostReference.clear()
+            hostReady = false
+        }
         onSafeToRelease()
+        hostDestroying = false
+        if (replacementAttached && hostReady) {
+            transition(EmbeddingHostState.SurfaceReady)
+            maybeStartSelected()
+        } else {
+            transition(EmbeddingHostState.Idle)
+        }
+    }
+
+    private fun ownedTaskPackages(ownership: RuntimeOwnership): Set<String> =
+        ComponentName.unflattenFromString(ownership.appKey)
+            ?.packageName
+            ?.let(::setOf)
+            ?: ownership.forceStopPackages.ifEmpty { ownership.runtimePackages }
+
+    private fun findTasksToStop(
+        ownership: RuntimeOwnership,
+        trackedTaskId: Int?,
+        trackedDisplayId: Int?,
+    ): Result<List<StackLocation>> = runCatching {
+        val tasks = linkedMapOf<Int, StackLocation>()
+        activityManager.findTasksByBasePackages(ownedTaskPackages(ownership))
+            .getOrThrow()
+            .forEach { location -> tasks[location.taskId] = location }
+        if (trackedDisplayId != null) {
+            activityManager.findTasksByBasePackages(ownership.runtimePackages)
+                .getOrThrow()
+                .filter { location -> location.displayId == trackedDisplayId }
+                .forEach { location -> tasks[location.taskId] = location }
+        }
+        trackedTaskId?.let { taskId ->
+            activityManager.findStackByTaskId(taskId)
+                .getOrThrow()
+                ?.let { location -> tasks[location.taskId] = location }
+        }
+        tasks.values.toList()
     }
 
     private fun resolveLaunchPlan(app: LauncherApp): LaunchPlan {
@@ -835,8 +893,8 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
             val displays = activityViewDisplayCount()
             if (displays != 1) invariantFailure("host ready with $displays ActivityView displays")
         }
-        if (seenRuntimePackages.isEmpty()) return
-        val tasks = activityManager.findTasksByBasePackages(seenRuntimePackages).getOrNull() ?: return
+        if (seenOwnedTaskPackages.isEmpty()) return
+        val tasks = activityManager.findTasksByBasePackages(seenOwnedTaskPackages).getOrNull() ?: return
         if (tasks.size > 1) {
             invariantFailure("multiple provider tasks alive: ${tasks.map { "${it.taskId}@${it.displayId}" }}")
         }
