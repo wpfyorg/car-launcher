@@ -231,8 +231,14 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
         selectedProvider = app?.let(::ProviderSelection)
         stoppedGeneration = null
         stoppedRuntimePackages = emptySet()
-        val stopGeneration = ++generation
         Log.i(Tag, "provider selected source=$source previous=${previous?.app?.stableKey} next=${app?.stableKey}")
+
+        if (hostDestroying) {
+            Log.i(Tag, "provider selection deferred until host teardown completes")
+            return
+        }
+
+        val stopGeneration = ++generation
 
         if (previousOwnership != null) {
             stopRuntime(previousOwnership, stopGeneration, reason = "provider switch") {
@@ -240,7 +246,12 @@ internal class NavigationEmbeddingEngine private constructor(context: Context) {
                 currentOwnership = null
                 previous?.app?.stableKey?.let(::clearPersistedTask)
                 assertNoTasks(ownedTaskPackages(previousOwnership), "provider switch completed")
-                if (app == null) transition(EmbeddingHostState.Idle) else launchSelected("provider switch")
+                if (app == null) {
+                    transition(EmbeddingHostState.Idle)
+                } else {
+                    transition(if (hostReady && !hostDestroying) EmbeddingHostState.SurfaceReady else EmbeddingHostState.Idle)
+                    maybeStartSelected()
+                }
             }
         } else if (app == null) {
             stopMismatchedPersistedTaskIfNeeded()
