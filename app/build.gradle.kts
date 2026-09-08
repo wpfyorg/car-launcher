@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace  = "com.openlauncher.app"
+    namespace  = "org.wpfy.carlauncher"
     compileSdk {
         version = release(36) { minorApiLevel = 1 }
     }
 
     defaultConfig {
-        applicationId  = "com.openlauncher.app"
+        applicationId  = "org.wpfy.carlauncher"
         minSdk         = 28
         targetSdk      = 36
         versionCode    = 8

@@ -1,3 +1,3 @@
 -keepattributes *Annotation*
--keep class com.openlauncher.app.data.** { *; }
--keep class com.openlauncher.app.model.** { *; }
+-keep class org.wpfy.carlauncher.data.** { *; }
+-keep class org.wpfy.carlauncher.model.** { *; }

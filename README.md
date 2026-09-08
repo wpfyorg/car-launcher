@@ -32,10 +32,10 @@ The APK is generated under `app/build/outputs/apk/debug/`. Build artifacts, sign
 
 The app is under active development. The standard public build does not include privileged system-app embedding or paid navigation code. Hardware-specific work for YT5760D/AC8257 head units is tracked privately until it is ready for public release.
 
-## Package compatibility
+## Attribution
 
-The product and Gradle project are named **Car Launcher**. The Android application ID remains `com.openlauncher.app` so existing development installs and launcher preferences continue to work.
+Car Launcher started from [OpenLauncher](https://github.com/vickoc911/openlauncher) and has since substantially diverged.
 
-## Attribution and licensing
+## License
 
-This codebase began as a redesign of [vickoc911/openlauncher](https://github.com/vickoc911/openlauncher). That repository does not currently include a license file, so this public repository does not assert a new license over the upstream code. All third-party contributions remain subject to their respective authors' rights.
+Licensing is still under provenance review. No license is granted by this repository at this time.
