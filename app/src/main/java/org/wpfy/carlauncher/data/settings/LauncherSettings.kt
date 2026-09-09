@@ -14,11 +14,19 @@ enum class TextSizePreset(
     Large("Large", 1.15f),
 }
 
+enum class RailPosition(val label: String) {
+    Left("Left"),
+    Right("Right"),
+    Bottom("Bottom"),
+}
+
 data class LauncherSettings(
+    val onboardingCompleted: Boolean = false,
     val startOnBoot: Boolean = false,
     val startupScreen: StartupScreen = StartupScreen.Home,
     val textSizePreset: TextSizePreset = TextSizePreset.Standard,
     val preferredMediaAppKey: String? = null,
     val navigationAppKey: String? = null,
     val navigationCompatibilityMode: Boolean = false,
+    val railPosition: RailPosition = RailPosition.Left,
 )

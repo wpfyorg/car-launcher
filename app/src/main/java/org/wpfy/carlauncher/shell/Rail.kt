@@ -90,7 +90,15 @@ fun Rail(
             NotificationRailButton(
                 count = notificationCount,
                 selected = selected == ShellDestination.Notifications,
-                onClick = { onDestinationSelected(ShellDestination.Notifications) },
+                onClick = {
+                    onDestinationSelected(
+                        if (selected == ShellDestination.Notifications) {
+                            ShellDestination.Home
+                        } else {
+                            ShellDestination.Notifications
+                        },
+                    )
+                },
             )
             StatusArea()
         }
@@ -110,7 +118,15 @@ fun Rail(
                 NotificationRailButton(
                     count = notificationCount,
                     selected = selected == ShellDestination.Notifications,
-                    onClick = { onDestinationSelected(ShellDestination.Notifications) },
+                    onClick = {
+                        onDestinationSelected(
+                            if (selected == ShellDestination.Notifications) {
+                                ShellDestination.Home
+                            } else {
+                                ShellDestination.Notifications
+                            },
+                        )
+                    },
                 )
             }
 
@@ -203,16 +219,22 @@ private fun AppLauncherButton(
     selected: ShellDestination,
     onDestinationSelected: (ShellDestination) -> Unit,
 ) {
+    val destination = appLauncherDestination(selected)
+    val onHome = destination == ShellDestination.Home
     CarRailButton(
-        icon = if (selected == ShellDestination.Apps) Icons.Rounded.Home else Icons.Rounded.Apps,
-        contentDescription = if (selected == ShellDestination.Apps) "Go home" else "Open app drawer",
-        selected = selected == ShellDestination.Home || selected == ShellDestination.Apps,
-        onClick = {
-            onDestinationSelected(
-                if (selected == ShellDestination.Apps) ShellDestination.Home else ShellDestination.Apps,
-            )
-        },
+        icon = if (onHome) Icons.Rounded.Home else Icons.Rounded.Apps,
+        contentDescription = if (onHome) "Go home" else "Open app drawer",
+        selected = selected == ShellDestination.Home,
+        onClick = { onDestinationSelected(destination) },
     )
+}
+
+internal fun appLauncherDestination(selected: ShellDestination): ShellDestination {
+    return if (selected == ShellDestination.Home) {
+        ShellDestination.Apps
+    } else {
+        ShellDestination.Home
+    }
 }
 
 @Composable
@@ -224,7 +246,7 @@ private fun NotificationRailButton(
     Box(modifier = Modifier.size(CarDimensions.RailActionSize)) {
         CarRailButton(
             icon = Icons.Rounded.Notifications,
-            contentDescription = "Notifications",
+            contentDescription = if (selected) "Go home" else "Open notifications",
             selected = selected,
             onClick = onClick,
             modifier = Modifier.fillMaxSize(),

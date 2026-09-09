@@ -19,6 +19,7 @@ import org.wpfy.carlauncher.design.theme.CarTheme
 import org.wpfy.carlauncher.feature.home.HomeRoute
 import org.wpfy.carlauncher.feature.media.AndroidMediaRepository
 import org.wpfy.carlauncher.feature.media.MediaRoute
+import org.wpfy.carlauncher.feature.onboarding.OnboardingRoute
 import org.wpfy.carlauncher.feature.notifications.AndroidNotificationRepository
 import org.wpfy.carlauncher.feature.notifications.NotificationRoute
 import org.wpfy.carlauncher.feature.settings.SettingsRoute
@@ -60,6 +61,8 @@ fun CarLauncherApp() {
                     .fillMaxSize()
                     .background(CarColors.Background),
             )
+        } else if (!settingsState.settings.onboardingCompleted) {
+            OnboardingRoute(settingsStateHolder)
         } else {
             val shellState = rememberShellState(
                 initialDestination = when (settingsState.settings.startupScreen) {
@@ -71,6 +74,7 @@ fun CarLauncherApp() {
                 showDebugOverlay = isDebuggable,
                 notificationCount = notificationState.notifications.size,
                 onAssistantClick = { launchAssistant(context) },
+                railPosition = settingsState.settings.railPosition,
                 state = shellState,
             ) { destination, navigateTo ->
                 when (destination) {

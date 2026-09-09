@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -31,12 +32,14 @@ import org.wpfy.carlauncher.design.theme.CarDimensions
 import org.wpfy.carlauncher.design.theme.CarShapes
 import org.wpfy.carlauncher.design.theme.CarSpacing
 import org.wpfy.carlauncher.design.component.CarHeader
+import org.wpfy.carlauncher.data.settings.RailPosition
 
 @Composable
 fun LauncherShell(
     showDebugOverlay: Boolean = false,
     notificationCount: Int = 0,
     onAssistantClick: () -> Unit = {},
+    railPosition: RailPosition = RailPosition.Left,
     state: ShellState = rememberShellState(),
     content: @Composable BoxScope.(ShellDestination, (ShellDestination) -> Unit) -> Unit = { destination, _ ->
         PlaceholderDestination(destination)
@@ -47,13 +50,7 @@ fun LauncherShell(
             .fillMaxSize()
             .background(CarColors.Background),
     ) {
-        val railOrientation = if (maxWidth < 880.dp) {
-            RailOrientation.Horizontal
-        } else {
-            RailOrientation.Vertical
-        }
-
-        if (railOrientation == RailOrientation.Horizontal) {
+        if (railPosition == RailPosition.Bottom) {
             Column(modifier = Modifier.fillMaxSize()) {
                 LauncherSurface(
                     modifier = Modifier
@@ -65,7 +62,9 @@ fun LauncherShell(
                             end = CarSpacing.Md,
                         ),
                 ) {
-                    content(state.destination, state::navigateTo)
+                    key(state.destination) {
+                        content(state.destination, state::navigateTo)
+                    }
                 }
 
                 Rail(
@@ -81,16 +80,13 @@ fun LauncherShell(
             }
         } else {
             Row(modifier = Modifier.fillMaxSize()) {
-                Rail(
-                    selected = state.destination,
-                    onDestinationSelected = state::navigateTo,
-                    notificationCount = notificationCount,
-                    onAssistantClick = onAssistantClick,
-                    orientation = RailOrientation.Vertical,
-                    modifier = Modifier
-                        .width(CarDimensions.RailWidth)
-                        .fillMaxHeight(),
-                )
+                if (railPosition == RailPosition.Left) {
+                    VerticalRail(
+                        state = state,
+                        notificationCount = notificationCount,
+                        onAssistantClick = onAssistantClick,
+                    )
+                }
 
                 Box(
                     modifier = Modifier
@@ -103,7 +99,17 @@ fun LauncherShell(
                             bottom = CarSpacing.Md,
                         ),
                 ) {
-                    content(state.destination, state::navigateTo)
+                    key(state.destination) {
+                        content(state.destination, state::navigateTo)
+                    }
+                }
+
+                if (railPosition == RailPosition.Right) {
+                    VerticalRail(
+                        state = state,
+                        notificationCount = notificationCount,
+                        onAssistantClick = onAssistantClick,
+                    )
                 }
             }
         }
@@ -116,6 +122,24 @@ fun LauncherShell(
             )
         }
     }
+}
+
+@Composable
+private fun VerticalRail(
+    state: ShellState,
+    notificationCount: Int,
+    onAssistantClick: () -> Unit,
+) {
+    Rail(
+        selected = state.destination,
+        onDestinationSelected = state::navigateTo,
+        notificationCount = notificationCount,
+        onAssistantClick = onAssistantClick,
+        orientation = RailOrientation.Vertical,
+        modifier = Modifier
+            .width(CarDimensions.RailWidth)
+            .fillMaxHeight(),
+    )
 }
 
 @Composable

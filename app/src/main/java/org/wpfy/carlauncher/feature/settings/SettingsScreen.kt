@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import org.wpfy.carlauncher.data.settings.RailPosition
 import org.wpfy.carlauncher.data.settings.StartupScreen
 import org.wpfy.carlauncher.data.settings.TextSizePreset
 import org.wpfy.carlauncher.design.component.CarHeader
@@ -63,6 +64,7 @@ fun SettingsRoute(stateHolder: SettingsStateHolder) {
         onOpenHomeSettings = { openSystemSettings(context, Settings.ACTION_HOME_SETTINGS) },
         onStartOnBootChange = stateHolder::setStartOnBoot,
         onStartupScreenChange = stateHolder::setStartupScreen,
+        onRailPositionChange = stateHolder::setRailPosition,
         onTextSizeChange = stateHolder::setTextSizePreset,
         onPreferredMediaAppChange = stateHolder::setPreferredMediaApp,
         onNavigationAppChange = stateHolder::setNavigationApp,
@@ -80,6 +82,7 @@ fun SettingsScreen(
     onOpenHomeSettings: () -> Unit,
     onStartOnBootChange: (Boolean) -> Unit,
     onStartupScreenChange: (StartupScreen) -> Unit,
+    onRailPositionChange: (RailPosition) -> Unit,
     onTextSizeChange: (TextSizePreset) -> Unit,
     onPreferredMediaAppChange: (LauncherApp?) -> Unit,
     onNavigationAppChange: (LauncherApp?) -> Unit,
@@ -102,6 +105,7 @@ fun SettingsScreen(
                 onOpenHomeSettings = onOpenHomeSettings,
                 onStartOnBootChange = onStartOnBootChange,
                 onOpenStartupScreen = { panel = SettingsPanel.StartupScreen.name },
+                onOpenRailPosition = { panel = SettingsPanel.RailPosition.name },
                 onOpenTextSize = { panel = SettingsPanel.TextSize.name },
                 onOpenMediaApp = { panel = SettingsPanel.MediaApp.name },
                 onOpenNavigationApp = { panel = SettingsPanel.NavigationApp.name },
@@ -115,6 +119,16 @@ fun SettingsScreen(
                 onBack = { panel = SettingsPanel.Main.name },
                 onSelected = { index ->
                     onStartupScreenChange(StartupScreen.entries[index])
+                    panel = SettingsPanel.Main.name
+                },
+            )
+
+            SettingsPanel.RailPosition -> OptionPicker(
+                title = "Navigation rail",
+                options = RailPosition.entries.map { it.label to (it == state.settings.railPosition) },
+                onBack = { panel = SettingsPanel.Main.name },
+                onSelected = { index ->
+                    onRailPositionChange(RailPosition.entries[index])
                     panel = SettingsPanel.Main.name
                 },
             )
@@ -163,6 +177,7 @@ private fun SettingsList(
     onOpenHomeSettings: () -> Unit,
     onStartOnBootChange: (Boolean) -> Unit,
     onOpenStartupScreen: () -> Unit,
+    onOpenRailPosition: () -> Unit,
     onOpenTextSize: () -> Unit,
     onOpenMediaApp: () -> Unit,
     onOpenNavigationApp: () -> Unit,
@@ -209,6 +224,12 @@ private fun SettingsList(
                 title = "Startup screen",
                 subtitle = settings.startupScreen.label,
                 onClick = onOpenStartupScreen,
+                showChevron = true,
+            )
+            settingRow(
+                title = "Navigation rail",
+                subtitle = settings.railPosition.label,
+                onClick = onOpenRailPosition,
                 showChevron = true,
             )
             settingRow(
@@ -478,6 +499,7 @@ data class DeviceDiagnostics(
 private enum class SettingsPanel {
     Main,
     StartupScreen,
+    RailPosition,
     TextSize,
     MediaApp,
     NavigationApp,
