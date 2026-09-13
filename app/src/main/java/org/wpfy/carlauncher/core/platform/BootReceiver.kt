@@ -3,6 +3,7 @@ package org.wpfy.carlauncher.core.platform
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import org.wpfy.carlauncher.MainActivity
 import org.wpfy.carlauncher.data.settings.RailPosition
 import org.wpfy.carlauncher.data.settings.SettingsRepository
@@ -25,7 +26,14 @@ class BootReceiver : BroadcastReceiver() {
                     runCatching {
                         settingsRepository.migrateExistingInstallOnUpgrade(defaultRailPosition(context))
                     }
-                } else if (settingsRepository.current().startOnBoot) {
+                } else if (
+                    startOnBootPolicy(
+                        sdkInt = Build.VERSION.SDK_INT,
+                        isDefaultHome = isDefaultHomeApp(context),
+                        enabled = settingsRepository.current().startOnBoot,
+                    ).launchesFromReceiver()
+                ) {
+                    // Android 9 and older only; later versions start the default Home app themselves.
                     runCatching {
                         context.startActivity(
                             Intent(context, MainActivity::class.java).apply {
