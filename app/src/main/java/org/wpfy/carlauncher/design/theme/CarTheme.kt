@@ -26,6 +26,8 @@ fun CarTheme(
     textScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
+    // Window size never rescales density: compact windows are recomposed (see CarWindow) instead of
+    // shrinking the whole interface. Only the user's text-size preset adjusts the font scale.
     val density = LocalDensity.current
     CompositionLocalProvider(
         LocalDensity provides Density(
