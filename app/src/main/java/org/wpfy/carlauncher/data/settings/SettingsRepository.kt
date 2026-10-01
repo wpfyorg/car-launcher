@@ -3,6 +3,7 @@ package org.wpfy.carlauncher.data.settings
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.Dispatchers
@@ -11,7 +12,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
-private val Context.settingsPreferences by preferencesDataStore(name = "settings_preferences")
+internal val Context.settingsPreferences by preferencesDataStore(name = "settings_preferences")
 
 class SettingsRepository(context: Context) {
     private val appContext = context.applicationContext
@@ -21,24 +22,7 @@ class SettingsRepository(context: Context) {
         Context.MODE_PRIVATE,
     )
 
-    val settings: Flow<LauncherSettings> = dataStore.data.map { preferences ->
-        LauncherSettings(
-            onboardingCompleted = preferences[OnboardingCompletedKey] ?: false,
-            startOnBoot = preferences[StartOnBootKey] ?: false,
-            startupScreen = preferences[StartupScreenKey]
-                ?.let { value -> runCatching { StartupScreen.valueOf(value) }.getOrNull() }
-                ?: StartupScreen.Home,
-            textSizePreset = preferences[TextSizeKey]
-                ?.let { value -> runCatching { TextSizePreset.valueOf(value) }.getOrNull() }
-                ?: TextSizePreset.Standard,
-            preferredMediaAppKey = preferences[PreferredMediaAppKey],
-            navigationAppKey = preferences[NavigationAppKey],
-            navigationCompatibilityMode = preferences[NavigationCompatibilityModeKey] ?: false,
-            railPosition = preferences[RailPositionKey]
-                ?.let { value -> runCatching { RailPosition.valueOf(value) }.getOrNull() }
-                ?: RailPosition.Left,
-        )
-    }
+    val settings: Flow<LauncherSettings> = dataStore.data.map(::settingsFromPreferences)
 
     suspend fun current(): LauncherSettings = settings.first()
 
@@ -72,8 +56,51 @@ class SettingsRepository(context: Context) {
         dataStore.edit { preferences -> preferences[NavigationCompatibilityModeKey] = enabled }
     }
 
+    suspend fun setNavigationCardPosition(position: NavigationCardPosition) {
+        dataStore.edit { preferences -> preferences[NavigationCardPositionKey] = position.name }
+    }
+
     suspend fun setRailPosition(position: RailPosition) {
         dataStore.edit { preferences -> preferences[RailPositionKey] = position.name }
+    }
+
+    suspend fun setOverlaySize(size: OverlaySize) {
+        dataStore.edit { preferences -> preferences[OverlaySizeKey] = size.name }
+    }
+
+    suspend fun setMediaCardCollapsed(collapsed: Boolean) {
+        dataStore.edit { preferences -> preferences[MediaCardCollapsedKey] = collapsed }
+    }
+
+    suspend fun setAppTheme(theme: AppTheme) {
+        dataStore.edit { preferences -> preferences[AppThemeKey] = theme.name }
+    }
+
+    suspend fun setVoiceGuidanceMuted(muted: Boolean) {
+        dataStore.edit { preferences -> preferences[VoiceGuidanceMutedKey] = muted }
+    }
+
+    suspend fun setVoiceVolume(volume: VoiceVolume) {
+        dataStore.edit { preferences -> preferences[VoiceVolumeKey] = volume.name }
+    }
+
+    suspend fun setVoiceName(name: String?) {
+        dataStore.edit { preferences ->
+            if (name == null) preferences.remove(VoiceNameKey)
+            else preferences[VoiceNameKey] = name
+        }
+    }
+
+    suspend fun setSpeedUnit(unit: SpeedUnitSetting) {
+        dataStore.edit { preferences -> preferences[SpeedUnitKey] = unit.name }
+    }
+
+    suspend fun setCameraAlertDistance(distance: CameraAlertDistance) {
+        dataStore.edit { preferences -> preferences[CameraAlertDistanceKey] = distance.name }
+    }
+
+    suspend fun setOverspeedWarning(warning: OverspeedWarning) {
+        dataStore.edit { preferences -> preferences[OverspeedWarningKey] = warning.name }
     }
 
     suspend fun completeOnboarding(position: RailPosition) {
@@ -142,9 +169,60 @@ private val TextSizeKey = stringPreferencesKey("text_size")
 private val PreferredMediaAppKey = stringPreferencesKey("preferred_media_app")
 private val NavigationAppKey = stringPreferencesKey("navigation_app")
 private val NavigationCompatibilityModeKey = booleanPreferencesKey("navigation_compatibility_mode")
+private val NavigationCardPositionKey = stringPreferencesKey("navigation_card_position")
 private val RailPositionKey = stringPreferencesKey("rail_position")
+private val OverlaySizeKey = stringPreferencesKey("overlay_size")
+private val MediaCardCollapsedKey = booleanPreferencesKey("media_card_collapsed")
+private val AppThemeKey = stringPreferencesKey("app_theme")
+internal val VoiceGuidanceMutedKey = booleanPreferencesKey("voice_guidance_muted")
+private val VoiceVolumeKey = stringPreferencesKey("voice_guidance_volume")
+private val VoiceNameKey = stringPreferencesKey("voice_guidance_voice")
+private val SpeedUnitKey = stringPreferencesKey("speed_unit")
+private val CameraAlertDistanceKey = stringPreferencesKey("camera_alert_distance")
+private val OverspeedWarningKey = stringPreferencesKey("overspeed_warning")
 private const val MigrationPreferencesName = "settings_migrations"
 private const val UpgradeMigrationPendingKey = "onboarding_upgrade_migration_pending"
+
+internal fun settingsFromPreferences(preferences: Preferences): LauncherSettings = LauncherSettings(
+    onboardingCompleted = preferences[OnboardingCompletedKey] ?: false,
+    startOnBoot = preferences[StartOnBootKey] ?: false,
+    startupScreen = preferences[StartupScreenKey]
+        ?.let { value -> runCatching { StartupScreen.valueOf(value) }.getOrNull() }
+        ?: StartupScreen.Home,
+    textSizePreset = preferences[TextSizeKey]
+        ?.let { value -> runCatching { TextSizePreset.valueOf(value) }.getOrNull() }
+        ?: TextSizePreset.Standard,
+    preferredMediaAppKey = preferences[PreferredMediaAppKey],
+    navigationAppKey = preferences[NavigationAppKey],
+    navigationCompatibilityMode = preferences[NavigationCompatibilityModeKey] ?: false,
+    navigationCardPosition = preferences[NavigationCardPositionKey]
+        ?.let { value -> runCatching { NavigationCardPosition.valueOf(value) }.getOrNull() }
+        ?: NavigationCardPosition.BottomLeft,
+    railPosition = preferences[RailPositionKey]
+        ?.let { value -> runCatching { RailPosition.valueOf(value) }.getOrNull() }
+        ?: RailPosition.Left,
+    overlaySize = preferences[OverlaySizeKey]
+        ?.let { value -> runCatching { OverlaySize.valueOf(value) }.getOrNull() }
+        ?: OverlaySize.Auto,
+    mediaCardCollapsed = preferences[MediaCardCollapsedKey] ?: false,
+    appTheme = preferences[AppThemeKey]
+        ?.let { value -> runCatching { AppTheme.valueOf(value) }.getOrNull() }
+        ?: AppTheme.Default,
+    voiceGuidanceMuted = preferences[VoiceGuidanceMutedKey] ?: false,
+    voiceVolume = preferences[VoiceVolumeKey]
+        ?.let { value -> runCatching { VoiceVolume.valueOf(value) }.getOrNull() }
+        ?: VoiceVolume.Max,
+    voiceName = preferences[VoiceNameKey],
+    speedUnit = preferences[SpeedUnitKey]
+        ?.let { value -> runCatching { SpeedUnitSetting.valueOf(value) }.getOrNull() }
+        ?: SpeedUnitSetting.Auto,
+    cameraAlertDistance = preferences[CameraAlertDistanceKey]
+        ?.let { value -> runCatching { CameraAlertDistance.valueOf(value) }.getOrNull() }
+        ?: CameraAlertDistance.Auto,
+    overspeedWarning = preferences[OverspeedWarningKey]
+        ?.let { value -> runCatching { OverspeedWarning.valueOf(value) }.getOrNull() }
+        ?: OverspeedWarning.AtLimit,
+)
 
 internal fun shouldMigrateLegacyOnboardingState(
     onboardingCompleted: Boolean?,
