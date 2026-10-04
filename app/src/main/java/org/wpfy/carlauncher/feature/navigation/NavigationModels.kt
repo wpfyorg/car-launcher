@@ -11,6 +11,8 @@ data class RouteSummary(
     val destination: NavigationDestination,
     val totalDistanceMeters: Double? = null,
     val estimatedDurationSeconds: Long? = null,
+    /** Engine duration before the ETA factor, kept for field calibration only. */
+    val rawDurationSeconds: Long? = null,
 )
 
 data class Maneuver(
@@ -18,6 +20,7 @@ data class Maneuver(
     val instruction: String,
     val roadName: String? = null,
     val distanceMeters: Double? = null,
+    val exitNumber: Int? = null,
 )
 
 enum class ManeuverType {
@@ -45,6 +48,7 @@ data class NavigationProgress(
     val remainingDurationSeconds: Long? = null,
     val etaEpochMillis: Long? = null,
     val speedMps: Double? = null,
+    val speedLimitKph: Int? = null,
     val headingDegrees: Double? = null,
     val rerouting: Boolean = false,
     val arrived: Boolean = false,
