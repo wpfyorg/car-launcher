@@ -39,9 +39,18 @@ interface MediaRepository {
     fun stop()
     fun refresh()
     fun selectSession(id: String)
+    fun setPreferredPackage(packageName: String?)
+
+    /** Re-reads the Bluetooth permission after the user answered the request or changed it in system settings. */
+    fun refreshBluetoothPermission()
 }
 
-class AndroidMediaRepository(context: Context) : MediaRepository {
+class AndroidMediaRepository(
+    context: Context,
+    private val bluetoothMonitor: BluetoothLinkMonitor = AndroidBluetoothLinkMonitor(context),
+    /** True only for the launcher's own instance; secondary readers must not publish. */
+    private val publishSelection: Boolean = false,
+) : MediaRepository {
     private val appContext = context.applicationContext
     private val mediaSessionManager =
         appContext.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
@@ -60,10 +69,12 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
     private val sessionIds = mutableMapOf<MediaSession.Token, String>()
     private var nextSessionId = 1L
     private var selectedController: MediaController? = null
-    private var userSelectedSessionId: String? = null
+    private val selector = MediaSourceSelector()
+    private var preferredPackage: String? = null
     private var sessionsListenerRegistered = false
     private var started = false
     private var tickerJob: Job? = null
+    private var linkJob: Job? = null
 
     override val sessionController = MediaSessionController { selectedController }
 
@@ -94,6 +105,14 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         if (started) return
         started = true
         NotificationListenerBridge.addListener(notificationRefreshListener)
+        bluetoothMonitor.start()
+        // A new link only reselects; the sessions themselves are unchanged.
+        linkJob = scope.launch {
+            bluetoothMonitor.link.collect { link ->
+                _state.value = _state.value.copy(bluetooth = link)
+                if (hasMediaAccess()) refreshFromTrackedControllers()
+            }
+        }
         refresh()
         tickerJob = scope.launch {
             while (isActive) {
@@ -108,6 +127,9 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         started = false
         tickerJob?.cancel()
         tickerJob = null
+        linkJob?.cancel()
+        linkJob = null
+        bluetoothMonitor.stop()
         NotificationListenerBridge.removeListener(notificationRefreshListener)
         unregisterSessionsListener()
         clearControllers()
@@ -123,8 +145,7 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
                 sessionIdFor(controller) == id
             }
             if (controller != null) {
-                userSelectedSessionId = id
-                selectedController = controller
+                selector.choose(id)
                 refreshFromTrackedControllers()
             }
         }
@@ -132,6 +153,33 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
             select()
         } else {
             mainHandler.post(select)
+        }
+    }
+
+    /** Drops the in-session choice made through [selectSession]; the preference applies again. */
+    fun forgetSessionChoice() {
+        val forget = {
+            selector.forgetChoice()
+            if (hasMediaAccess()) refreshFromTrackedControllers()
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) forget() else mainHandler.post(forget)
+    }
+
+    override fun setPreferredPackage(packageName: String?) {
+        val update = {
+            if (preferredPackage != packageName) {
+                preferredPackage = packageName
+                if (hasMediaAccess()) refreshFromTrackedControllers()
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) update() else mainHandler.post(update)
+    }
+
+    override fun refreshBluetoothPermission() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            bluetoothMonitor.refreshPermission()
+        } else {
+            mainHandler.post(bluetoothMonitor::refreshPermission)
         }
     }
 
@@ -143,7 +191,10 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
             ) {
                 unregisterSessionsListener()
                 clearControllers()
-                _state.value = MediaState(accessStatus = MediaAccessStatus.PermissionRequired)
+                _state.value = MediaState(
+                    accessStatus = MediaAccessStatus.PermissionRequired,
+                    bluetooth = bluetoothMonitor.link.value,
+                )
             }
             return
         }
@@ -164,7 +215,10 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         if (!hasMediaAccess()) {
             unregisterSessionsListener()
             clearControllers()
-            _state.value = MediaState(accessStatus = MediaAccessStatus.PermissionRequired)
+            _state.value = MediaState(
+                accessStatus = MediaAccessStatus.PermissionRequired,
+                bluetooth = bluetoothMonitor.link.value,
+            )
             return
         }
 
@@ -238,6 +292,15 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         }
     }
 
+    private fun publishSelected() {
+        if (!publishSelection) return
+        val selected = selectedController
+        ActiveMediaSelection.publish(selected?.let { ActiveMedia(it.packageName, it.sessionToken) })
+    }
+
+    /** This repository's id for the session behind [token], once it tracks that session. Main thread. */
+    fun sessionIdOf(token: MediaSession.Token): String? = sessionIds[token]
+
     private fun clearControllers() {
         trackedControllers.values.forEach { controller ->
             controller.unregisterCallback(controllerCallback)
@@ -245,38 +308,50 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         trackedControllers.clear()
         sessionIds.clear()
         selectedController = null
-        userSelectedSessionId = null
+        selector.clear()
+        publishSelected()
     }
 
     private fun refreshFromTrackedControllers() {
-        val controllers = trackedControllers.values.toList()
+        val link = bluetoothMonitor.link.value
+        val candidates = trackedControllers.values.map { controller ->
+            SessionCandidate(
+                id = sessionIdFor(controller),
+                packageName = controller.packageName,
+                priority = controllerPriority(controller),
+                isBluetooth = isBluetoothSessionPackage(controller.packageName),
+                isError = controller.playbackState?.state == PlaybackState.STATE_ERROR,
+            )
+        }
+        // A Bluetooth session that is not connected is dropped from the pager and the commands too.
+        val usable = usableCandidates(candidates, link)
+        val usableIds = usable.mapTo(mutableSetOf(), SessionCandidate::id)
+        val controllers = trackedControllers.values.filter { sessionIdFor(it) in usableIds }
+        selector.onBluetoothConnected(bluetoothConnectedSignal(link, candidates))
         if (controllers.isEmpty()) {
             selectedController = null
-            userSelectedSessionId = null
-            _state.value = MediaState(accessStatus = MediaAccessStatus.Available)
+            selector.clear()
+            publishSelected()
+            _state.value = MediaState(accessStatus = MediaAccessStatus.Available, bluetooth = link)
             return
         }
 
-        val sessions = controllers.map(::sessionFor)
+        val sessions = controllers.map { sessionFor(it, link) }
         val sessionsById = sessions.associateBy(MediaSourceSession::id)
-        val explicitSessionId = userSelectedSessionId?.takeIf(sessionsById::containsKey)
-        if (userSelectedSessionId != null && explicitSessionId == null) {
-            userSelectedSessionId = null
-        }
-
-        val selectedSessionId = explicitSessionId ?: controllers
-            .minByOrNull(::controllerPriority)
-            ?.let(::sessionIdFor)
+        val selectedSessionId = selector.select(usable, preferredPackage)?.id
         val selectedSession = selectedSessionId?.let(sessionsById::get)
         selectedController = selectedSessionId?.let { id ->
             controllers.firstOrNull { controller -> sessionIdFor(controller) == id }
         }
+        if (selectedSession != null) publishSelected()
 
         if (selectedSession == null) {
             selectedController = null
+            publishSelected()
             _state.value = MediaState(
                 accessStatus = MediaAccessStatus.Available,
                 availableSessions = sessions,
+                bluetooth = link,
             )
             return
         }
@@ -297,17 +372,17 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
             controls = selectedSession.controls,
             availableSessions = sessions,
             selectedSessionId = selectedSession.id,
+            bluetooth = link,
         )
     }
 
-    private fun sessionFor(controller: MediaController): MediaSourceSession {
-
+    private fun sessionFor(controller: MediaController, link: BluetoothLink): MediaSourceSession {
         val metadata = controller.metadata
         val playbackState = controller.playbackState
         val durationMs = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)
             ?.coerceAtLeast(0L)
             ?: 0L
-        val source = sourceFor(controller.packageName)
+        val source = sourceFor(controller.packageName, link)
         val title = metadata.firstNonBlank(
             MediaMetadata.METADATA_KEY_DISPLAY_TITLE,
             MediaMetadata.METADATA_KEY_TITLE,
@@ -358,6 +433,13 @@ class AndroidMediaRepository(context: Context) : MediaRepository {
         return sessionIds.getOrPut(token) {
             "${controller.packageName}:${nextSessionId++}"
         }
+    }
+
+    /** The source of a session. The Bluetooth source is labelled with the phone's name, which is never cached. */
+    private fun sourceFor(packageName: String, link: BluetoothLink): MediaSource? {
+        if (!isBluetoothSessionPackage(packageName)) return sourceFor(packageName)
+        val base = sourceFor(packageName) ?: MediaSource(packageName, label = "")
+        return base.copy(label = bluetoothSourceLabel(link))
     }
 
     private fun sourceFor(packageName: String): MediaSource? {
