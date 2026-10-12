@@ -1,6 +1,9 @@
 package org.wpfy.carlauncher.feature.notifications
 
+import android.app.ActivityOptions
 import android.app.Notification
+import android.app.PendingIntent
+import android.os.Build
 import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
@@ -26,6 +29,7 @@ interface NotificationRepository {
     fun stop()
     fun refresh()
     fun dismiss(key: String)
+    fun open(key: String)
     fun clearAllVisible()
 }
 
@@ -36,6 +40,7 @@ class AndroidNotificationRepository(context: Context) : NotificationRepository {
         appContext,
         LauncherNotificationListenerService::class.java,
     )
+    private val contentIntents = mutableMapOf<String, PendingIntent>()
     private val appInfoCache = mutableMapOf<String, Pair<String, Bitmap?>>()
 
     private val _state = MutableStateFlow(NotificationState())
@@ -87,14 +92,22 @@ class AndroidNotificationRepository(context: Context) : NotificationRepository {
 
             val active = runCatching { service.activeNotifications?.toList().orEmpty() }
                 .getOrDefault(emptyList())
+            val intents = mutableMapOf<String, PendingIntent>()
+            val notifications = active
+                .asSequence()
+                .filter(::isSafeForDrivingDisplay)
+                .mapNotNull { sbn ->
+                    toLauncherNotification(sbn)?.also {
+                        sbn.notification?.contentIntent?.let { intent -> intents[sbn.key] = intent }
+                    }
+                }
+                .sortedByDescending(LauncherNotification::postTimeMillis)
+                .toList()
+            contentIntents.clear()
+            contentIntents.putAll(intents)
             _state.value = NotificationState(
                 accessStatus = NotificationAccessStatus.Available,
-                notifications = active
-                    .asSequence()
-                    .filter(::isSafeForDrivingDisplay)
-                    .mapNotNull(::toLauncherNotification)
-                    .sortedByDescending(LauncherNotification::postTimeMillis)
-                    .toList(),
+                notifications = notifications,
             )
         }
     }
@@ -104,6 +117,25 @@ class AndroidNotificationRepository(context: Context) : NotificationRepository {
         if (!notification.isClearable) return
         runCatching { NotificationListenerBridge.service?.cancelNotification(key) }
         refresh()
+    }
+
+    override fun open(key: String) {
+        val intent = contentIntents[key] ?: return
+        val notification = _state.value.notifications.firstOrNull { it.key == key } ?: return
+        val sent = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val options = ActivityOptions.makeBasic().setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED,
+                )
+                intent.send(appContext, 0, null, null, null, null, options.toBundle())
+            } else {
+                intent.send()
+            }
+        }.isSuccess
+        if (shouldCancelAfterOpen(sent, notification.autoCancel)) {
+            runCatching { NotificationListenerBridge.service?.cancelNotification(key) }
+            refresh()
+        }
     }
 
     override fun clearAllVisible() {
@@ -162,6 +194,8 @@ class AndroidNotificationRepository(context: Context) : NotificationRepository {
             text = text.take(MaxTextLength),
             postTimeMillis = sbn.postTime,
             isClearable = sbn.isClearable,
+            canOpen = notification.contentIntent != null,
+            autoCancel = notification.flags and Notification.FLAG_AUTO_CANCEL != 0,
         )
     }
 
