@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.net.Uri
 import android.os.Build
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
@@ -24,22 +26,26 @@ class AppCatalog(context: Context) {
     private val iconCache = LruCache<String, ImageBitmap>(64)
 
     suspend fun loadApps(): List<LauncherApp> = withContext(Dispatchers.IO) {
+        loadLauncherApps()
+    }
+
+    suspend fun loadNavigationApps(): List<LauncherApp> = withContext(Dispatchers.IO) {
+        val eligiblePackages = buildSet {
+            navigationIntents().forEach { intent ->
+                queryActivities(intent).forEach { resolveInfo ->
+                    add(resolveInfo.activityInfo.packageName)
+                }
+            }
+        }
+        loadLauncherApps().filter { app -> app.packageName in eligiblePackages }
+    }
+
+    private fun loadLauncherApps(): List<LauncherApp> {
         val launcherIntent = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
         }
-
-        val resolveInfos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.queryIntentActivities(
-                launcherIntent,
-                PackageManager.ResolveInfoFlags.of(0),
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            packageManager.queryIntentActivities(launcherIntent, 0)
-        }
-
         val collator = Collator.getInstance()
-        resolveInfos
+        return queryActivities(launcherIntent)
             .asSequence()
             .filter { it.activityInfo.packageName != appContext.packageName }
             .filter { it.activityInfo.enabled && it.activityInfo.applicationInfo.enabled }
@@ -58,6 +64,23 @@ class AppCatalog(context: Context) {
             .sortedWith { left, right -> collator.compare(left.label, right.label) }
             .toList()
     }
+
+    private fun queryActivities(intent: Intent): List<ResolveInfo> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.queryIntentActivities(
+                intent,
+                PackageManager.ResolveInfoFlags.of(0),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.queryIntentActivities(intent, 0)
+        }
+    }
+
+    private fun navigationIntents(): List<Intent> = listOf(
+        Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=destination")),
+        Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=destination")),
+    )
 
     suspend fun loadIcon(app: LauncherApp): ImageBitmap? = withContext(Dispatchers.IO) {
         iconCache.get(app.stableKey)?.let { return@withContext it }
