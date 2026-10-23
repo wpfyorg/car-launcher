@@ -27,8 +27,8 @@ class AppsStateHolder(
 
     init {
         scope.launch {
-            pinnedAppsRepository.pinnedAppKeys.collectLatest { pinnedAppKeys ->
-                uiState = uiState.copy(pinnedAppKeys = pinnedAppKeys)
+            pinnedAppsRepository.orderedPinnedAppKeys.collectLatest { pinnedAppKeys ->
+                uiState = uiState.copy(orderedPinnedAppKeys = pinnedAppKeys)
             }
         }
 
@@ -54,6 +54,13 @@ class AppsStateHolder(
         val shouldPin = !uiState.isPinned(app)
         scope.launch {
             pinnedAppsRepository.setPinned(app.stableKey, shouldPin)
+        }
+    }
+
+    /** Moves the pinned app [appKey] to [targetIndex] of the pin order. */
+    fun movePinned(appKey: String, targetIndex: Int) {
+        scope.launch {
+            pinnedAppsRepository.movePinned(appKey, targetIndex)
         }
     }
 
