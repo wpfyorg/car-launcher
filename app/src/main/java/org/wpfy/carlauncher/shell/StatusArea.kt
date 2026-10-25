@@ -1,51 +1,63 @@
 package org.wpfy.carlauncher.shell
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.text.format.DateFormat
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import org.wpfy.carlauncher.design.theme.CarColors
-import kotlinx.coroutines.delay
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import androidx.compose.runtime.LaunchedEffect
 
+/**
+ * The time in the system's 12 or 24 hour style. It refreshes every minute, when the time, zone or
+ * hour format changes, and when the launcher resumes.
+ */
 @Composable
-fun StatusArea(modifier: Modifier = Modifier) {
-    var currentTime by remember { mutableStateOf(formattedTime()) }
+fun rememberClockText(): String {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var currentTime by remember { mutableStateOf(formattedClock(context)) }
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            currentTime = formattedTime()
-            delay(30_000)
+    DisposableEffect(context, lifecycleOwner) {
+        val refresh = { currentTime = formattedClock(context) }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) = refresh()
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_TIME_TICK)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        context.registerReceiver(receiver, filter)
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        refresh()
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            context.unregisterReceiver(receiver)
         }
     }
-
-    Box(
-        modifier = modifier.size(64.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = currentTime,
-                color = CarColors.TextPrimary,
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
+    return currentTime
 }
 
-private val TimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+/** [time] as "HH:mm" in 24 hour style, or "h:mm" (no day-period, the dock clock is narrow) in 12 hour style. */
+internal fun formatClock(time: LocalTime, is24Hour: Boolean): String =
+    time.format(if (is24Hour) Clock24Formatter else Clock12Formatter)
 
-private fun formattedTime(): String = LocalTime.now().format(TimeFormatter)
+private fun formattedClock(context: Context): String =
+    formatClock(LocalTime.now(), DateFormat.is24HourFormat(context))
+
+private val Clock24Formatter = DateTimeFormatter.ofPattern("HH:mm")
+private val Clock12Formatter = DateTimeFormatter.ofPattern("h:mm")
