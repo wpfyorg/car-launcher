@@ -1,6 +1,6 @@
 # Car Launcher
 
-Car Launcher is a landscape-first Android home screen for aftermarket car head units. It is designed for Android 9 (API 28) and newer, with a large-touch-target Compose UI suitable for dashboard use.
+Car Launcher is an Android home screen for aftermarket car head units. It supports portrait and landscape layouts on Android 9 (API 28) and newer, with a large-touch-target Compose UI suitable for dashboard use.
 
 ## Current features
 
@@ -12,13 +12,14 @@ Car Launcher is a landscape-first Android home screen for aftermarket car head u
 - Driving-oriented notification list
 - Dark/light appearance, text sizing, startup-screen, and launcher settings
 - Optional launch-at-boot behavior
+- Trip recording and history screens
 
 ## Build
 
 Requirements:
 
 - JDK 17
-- Android SDK with API 36 installed
+- Android SDK with platform 36.1 installed
 
 Build the public debug APK:
 
@@ -30,7 +31,7 @@ The APK is generated under `app/build/outputs/apk/debug/`. Build artifacts, sign
 
 ## Status
 
-The app is under active development. The standard public build does not include privileged system-app embedding or paid navigation code. Hardware-specific work for YT5760D/AC8257 head units is tracked privately until it is ready for public release.
+The app is under active development. Free opens the selected external navigation app through Android's public APIs. The public build does not include privileged system-app embedding or paid navigation code. Hardware-specific work for YT5760D/AC8257 head units is tracked privately until it is ready for public release.
 
 ## Attribution
 
