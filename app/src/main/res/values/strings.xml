@@ -4,4 +4,14 @@
     <string name="settings_label">Car Launcher Settings</string>
     <string name="media_label">Car Launcher Media</string>
     <string name="notification_access_label">Car Launcher notification access</string>
+    <string name="paid_dock_open_phone">Open phone</string>
+    <string name="paid_dock_open_music">Open music</string>
+    <string name="paid_dock_open_maps">Open maps</string>
+    <string name="paid_dock_open_radio">Open radio</string>
+    <string name="paid_dock_open_apps">Open apps</string>
+    <string name="paid_dock_label_phone">Phone</string>
+    <string name="paid_dock_label_music">Music</string>
+    <string name="paid_dock_label_maps">Maps</string>
+    <string name="paid_dock_label_radio">Radio</string>
+    <string name="paid_dock_label_apps">Apps</string>
 </resources>
