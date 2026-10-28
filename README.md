@@ -39,4 +39,4 @@ Car Launcher started from [OpenLauncher](https://github.com/vickoc911/openlaunch
 
 ## License
 
-Licensing is still under provenance review. No license is granted by this repository at this time.
+Car Launcher Free original code and modifications are licensed under the **GNU Affero General Public License, version 3 only (AGPL-3.0-only)**. See [LICENSE](LICENSE). Third-party components retain their own licenses and copyright notices.
